@@ -1,6 +1,6 @@
 import {
   mysqlTable,
-  serial,
+  bigint,
   varchar,
   text,
   timestamp,
@@ -14,7 +14,7 @@ import {
 
 // ── Businesses (raw data from external sources like Google Places) ──
 export const businesses = mysqlTable("businesses", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   externalId: varchar("external_id", { length: 255 }), // Google Place ID
   name: varchar("name", { length: 255 }).notNull(),
   owner: varchar("owner", { length: 255 }),
@@ -44,7 +44,7 @@ export const businesses = mysqlTable("businesses", {
 
 // ── Leads (enriched businesses with AI scoring & pipeline status) ──
 export const leads = mysqlTable("leads", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   businessId: int("business_id").notNull(),
   status: varchar("status", { length: 50 }).notNull().default("new"), // new, contacted, qualified, proposal_sent, negotiation, won, lost, archived
   stage: varchar("stage", { length: 50 }).notNull().default("research"), // research, contacted, negotiation, won, lost
@@ -73,7 +73,7 @@ export const leads = mysqlTable("leads", {
 
 // ── Website Analyses ──
 export const websiteAnalyses = mysqlTable("website_analyses", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   businessId: int("business_id").notNull(),
   modernAppearance: int("modern_appearance").default(0),
   visualQuality: int("visual_quality").default(0),
@@ -113,7 +113,7 @@ export const websiteAnalyses = mysqlTable("website_analyses", {
 
 // ── Scout Jobs (background search tasks) ──
 export const scoutJobs = mysqlTable("scout_jobs", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   query: varchar("query", { length: 500 }).notNull(),
   status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, running, paused, completed, failed
   progress: int("progress").default(0),
@@ -133,7 +133,7 @@ export const scoutJobs = mysqlTable("scout_jobs", {
 
 // ── Email Drafts ──
 export const emailDrafts = mysqlTable("email_drafts", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   leadId: int("lead_id").notNull(),
   type: varchar("type", { length: 50 }).notNull().default("cold_email"), // cold_email, linkedin, facebook, followup1, followup2, followup3, proposal
   subject: varchar("subject", { length: 500 }),
@@ -150,7 +150,7 @@ export const emailDrafts = mysqlTable("email_drafts", {
 
 // ── Notes ──
 export const notes = mysqlTable("notes", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   leadId: int("lead_id").notNull(),
   content: text("content").notNull(),
   createdBy: varchar("created_by", { length: 255 }).default("user"),
@@ -161,7 +161,7 @@ export const notes = mysqlTable("notes", {
 
 // ── User Settings ──
 export const userSettings = mysqlTable("user_settings", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   email: varchar("email", { length: 255 }).notNull(),
   name: varchar("name", { length: 255 }),
   company: varchar("company", { length: 255 }),
@@ -178,7 +178,7 @@ export const userSettings = mysqlTable("user_settings", {
 });
 
 export const users = mysqlTable("users", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   unionId: varchar("unionId", { length: 255 }).notNull().unique(),
   name: varchar("name", { length: 255 }),
   email: varchar("email", { length: 320 }),
@@ -192,5 +192,23 @@ export const users = mysqlTable("users", {
   lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
 });
 
+// ── Local Users (email/password auth) ──
+export const localUsers = mysqlTable("local_users", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  emailConfirmed: tinyint("email_confirmed").default(0),
+  confirmationToken: varchar("confirmation_token", { length: 255 }),
+  resetToken: varchar("reset_token", { length: 255 }),
+  resetTokenExpiry: timestamp("reset_token_expiry"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  lastSignInAt: timestamp("last_sign_in_at").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type LocalUser = typeof localUsers.$inferSelect;
+export type InsertLocalUser = typeof localUsers.$inferInsert;

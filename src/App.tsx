@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
+import { AuthGuard, AdminGuard } from './components/AuthGuard';
 import Layout from './components/Layout';
 import { ToastProvider } from './hooks/useToast';
 import Dashboard from './pages/Dashboard';
@@ -10,27 +11,127 @@ import OutreachPage from './pages/OutreachPage';
 import EmailPage from './pages/EmailPage';
 import KimiPage from './pages/KimiPage';
 import SettingsPage from './pages/SettingsPage';
-import Login from "./pages/Login"
-import NotFound from "./pages/NotFound"
+import AdminDashboard from './pages/AdminDashboard';
+import Login from './pages/Login';
+import NotFound from './pages/NotFound';
+
+function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ToastProvider>
+      <Layout>{children}</Layout>
+    </ToastProvider>
+  );
+}
 
 export default function App() {
   return (
-    <ToastProvider>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/leads" element={<LeadsPage />} />
-          <Route path="/leads/:id" element={<LeadDetailPage />} />
-          <Route path="/pipeline" element={<PipelinePage />} />
-          <Route path="/outreach" element={<OutreachPage />} />
-          <Route path="/email" element={<EmailPage />} />
-          <Route path="/kimi" element={<KimiPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Layout>
-    </ToastProvider>
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<Login />} />
+
+      {/* Protected routes */}
+      <Route
+        path="/"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <Dashboard />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/search"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <SearchPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/leads"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <LeadsPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/leads/:id"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <LeadDetailPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/pipeline"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <PipelinePage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/outreach"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <OutreachPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/email"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <EmailPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/kimi"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <KimiPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <AuthGuard>
+            <AppLayout>
+              <SettingsPage />
+            </AppLayout>
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <AdminGuard>
+            <AppLayout>
+              <AdminDashboard />
+            </AppLayout>
+          </AdminGuard>
+        }
+      />
+
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }

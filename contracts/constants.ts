@@ -1,5 +1,6 @@
 export const Session = {
   cookieName: "kimi_sid",
+  localCookieName: "local_sid",
   maxAgeMs: 365 * 24 * 60 * 60 * 1000,
 } as const;
 
