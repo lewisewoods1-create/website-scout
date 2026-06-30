@@ -1,12 +1,18 @@
 import { createRouter, publicQuery } from "./middleware";
+import { businessRouter } from "./routers/business";
+import { leadRouter } from "./routers/lead";
+import { scoutRouter } from "./routers/scout";
+import { outreachRouter } from "./routers/outreach";
+import { settingsRouter } from "./routers/settings";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
 
-  // TODO: add feature routers here, e.g.
-  // todo: createRouter({
-  //   list: publicQuery.query(() => findTodos()),
-  // }),
+  business: businessRouter,
+  lead: leadRouter,
+  scout: scoutRouter,
+  outreach: outreachRouter,
+  settings: settingsRouter,
 });
 
 export type AppRouter = typeof appRouter;

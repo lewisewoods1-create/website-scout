@@ -4,101 +4,141 @@ import {
   Search,
   Sparkles,
   SlidersHorizontal,
-  Play,
-  Pause,
-  RotateCcw,
-  CheckCircle,
   Loader2,
-  Clock,
+  AlertCircle,
+  Key,
+  CheckCircle,
+  Pause,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { mockScoutJobs, industries, locations } from '@/data/mockData';
+import { trpc } from '@/providers/trpc';
+import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/hooks/useToast';
+import { Link } from 'react-router-dom';
 
 export default function SearchPage() {
+  const { addToast } = useToast();
+  const { kimiApiKey, googlePlacesApiKey } = useSettings();
+  const utils = trpc.useUtils();
+
   const [query, setQuery] = useState('');
+  const [location, setLocation] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchStage, setSearchStage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
-  const [activeJobs, setActiveJobs] = useState(mockScoutJobs);
-  const { addToast } = useToast();
 
-  const [filters, setFilters] = useState({
-    industry: 'All',
-    location: 'All',
-    hasWebsite: '',
-    minRating: '',
-    minScore: '',
-  });
+  const scoutList = trpc.scout.list.useQuery();
+  const activeJobs = scoutList.data || [];
 
   const searchStages = [
     'Parsing natural language query...',
-    'Identifying business directories...',
-    'Scanning Google Maps...',
-    'Searching Bing Places...',
-    'Checking Yell.com...',
-    'Scanning Facebook Business...',
-    'Analyzing Trustpilot reviews...',
-    'Cross-referencing LinkedIn...',
-    'Deduplicating results...',
+    'Connecting to Google Places API...',
+    'Scanning business directories...',
+    'Finding businesses in your area...',
+    'Fetching business details...',
+    'Checking for websites...',
     'Running website analysis...',
-    'Calculating AI scores...',
-    'Generating proposals...',
+    'AI scoring businesses...',
+    'Calculating opportunity scores...',
+    'Generating outreach content...',
+    'Saving results to database...',
+    'Done!',
   ];
 
-  const handleSearch = () => {
+  const executeScout = trpc.scout.execute.useMutation({
+    onSuccess: (data) => {
+      addToast(data.message, 'success');
+      utils.lead.list.invalidate();
+      utils.business.list.invalidate();
+      utils.scout.list.invalidate();
+    },
+    onError: (err) => {
+      addToast(err.message, 'error');
+    },
+  });
+
+  const handleSearch = async () => {
     if (!query.trim()) {
       addToast('Please enter a search query', 'warning');
+      return;
+    }
+
+    if (!googlePlacesApiKey && !kimiApiKey) {
+      addToast('Add API keys in Settings first', 'warning');
       return;
     }
 
     setIsSearching(true);
     setSearchStage(0);
 
+    // Animate progress
     const interval = setInterval(() => {
       setSearchStage((prev) => {
-        if (prev >= searchStages.length - 1) {
+        if (prev >= searchStages.length - 2) {
           clearInterval(interval);
-          setIsSearching(false);
-          addToast(`Found 24 new leads for "${query}"`, 'success');
           return prev;
         }
         return prev + 1;
       });
-    }, 800);
-  };
+    }, 600);
 
-  const toggleJobStatus = (jobId: string) => {
-    setActiveJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId ? { ...j, status: j.status === 'running' ? 'paused' : 'running' as const } : j
-      )
-    );
+    try {
+      await executeScout.mutateAsync({
+        query,
+        location: location || undefined,
+        kimiApiKey: kimiApiKey || undefined,
+      });
+      setSearchStage(searchStages.length - 1);
+    } catch {
+      // Error handled by onError
+    } finally {
+      setTimeout(() => setIsSearching(false), 1000);
+      clearInterval(interval);
+    }
   };
 
   const sampleQueries = [
-    'Dentists in Manchester',
-    'Hairdressers in Blackburn',
-    'Electricians in Leeds',
-    'Plumbers with no website',
-    'Restaurants in York with poor SEO',
-    'Cafes with outdated websites',
+    'Dentists',
+    'Hairdressers',
+    'Electricians',
+    'Plumbers',
+    'Restaurants',
+    'Cafes',
   ];
+
+  const hasApiKeys = !!(googlePlacesApiKey || kimiApiKey);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-3xl font-bold text-[#f4f4f5] mb-2">AI Scout</h1>
         <p className="text-[#8c8c96]">
-          Tell the AI what businesses to find. Use natural language like{' '}
-          <span className="text-violet-400">"Find dentists in Manchester with no website"</span>
+          Find real businesses in your area using Google Places + Kimi AI
         </p>
       </motion.div>
 
-      {/* Search Input */}
+      {!hasApiKeys && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="glass-panel rounded-xl p-4 border-amber-500/20 flex items-center gap-3"
+        >
+          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-amber-400">
+              API keys required to find real businesses.
+            </p>
+            <p className="text-xs text-[#6c6c74]">
+              Add your Google Places API key and Kimi API key in{' '}
+              <Link to="/settings" className="text-violet-400 hover:underline">Settings</Link>
+            </p>
+          </div>
+          <Key className="w-5 h-5 text-amber-400" />
+        </motion.div>
+      )}
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -112,8 +152,8 @@ export default function SearchPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder='Try "Find plumbers in Sheffield with poor websites"'
-              className="pl-12 h-14 bg-[#0a0a0c] border-[#2a2a2e] text-[#f4f4f5] text-lg placeholder:text-[#6c6c74] focus:border-violet-500/50 focus:ring-violet-500/20 rounded-xl"
+              placeholder='e.g. "Dentists in Manchester"'
+              className="pl-12 h-14 bg-[#0a0a0c] border-[#2a2a2e] text-[#f4f4f5] text-lg placeholder:text-[#6c6c74] focus:border-violet-500/50 rounded-xl"
             />
           </div>
           <Button
@@ -125,7 +165,7 @@ export default function SearchPage() {
           </Button>
           <Button
             onClick={handleSearch}
-            disabled={isSearching}
+            disabled={isSearching || !query.trim()}
             className="h-14 px-8 bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white gap-2 text-base shadow-lg shadow-violet-500/25"
           >
             {isSearching ? (
@@ -142,23 +182,19 @@ export default function SearchPage() {
           </Button>
         </div>
 
-        {/* Sample Queries */}
-        {!isSearching && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="text-xs text-[#6c6c74] mr-2">Try:</span>
-            {sampleQueries.map((q) => (
-              <button
-                key={q}
-                onClick={() => setQuery(q)}
-                className="text-xs px-3 py-1.5 rounded-full bg-[#1c1c20] text-[#8c8c96] hover:text-violet-400 hover:bg-violet-500/10 border border-[#2a2a2e] hover:border-violet-500/30 transition-all"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span className="text-xs text-[#6c6c74] mr-2">Try:</span>
+          {sampleQueries.map((q) => (
+            <button
+              key={q}
+              onClick={() => setQuery(q)}
+              className="text-xs px-3 py-1.5 rounded-full bg-[#1c1c20] text-[#8c8c96] hover:text-violet-400 hover:bg-violet-500/10 border border-[#2a2a2e] hover:border-violet-500/30 transition-all"
+            >
+              {q}
+            </button>
+          ))}
+        </div>
 
-        {/* Filters */}
         <AnimatePresence>
           {showFilters && (
             <motion.div
@@ -168,59 +204,21 @@ export default function SearchPage() {
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-[#2a2a2e]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-[#2a2a2e]">
                 <div>
-                  <label className="text-xs text-[#6c6c74] mb-1.5 block">Industry</label>
-                  <select
-                    value={filters.industry}
-                    onChange={(e) => setFilters({ ...filters, industry: e.target.value })}
-                    className="w-full h-10 px-3 rounded-lg bg-[#0a0a0c] border border-[#2a2a2e] text-[#f4f4f5] text-sm focus:border-violet-500/50 focus:outline-none"
-                  >
-                    {industries.map((i) => (
-                      <option key={i} value={i}>
-                        {i}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-[#6c6c74] mb-1.5 block">Location</label>
-                  <select
-                    value={filters.location}
-                    onChange={(e) => setFilters({ ...filters, location: e.target.value })}
-                    className="w-full h-10 px-3 rounded-lg bg-[#0a0a0c] border border-[#2a2a2e] text-[#f4f4f5] text-sm focus:border-violet-500/50 focus:outline-none"
-                  >
-                    {locations.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-[#6c6c74] mb-1.5 block">Min Rating</label>
+                  <label className="text-xs text-[#6c6c74] mb-1.5 block">Location (city/area)</label>
                   <Input
-                    type="number"
-                    min="0"
-                    max="5"
-                    step="0.1"
-                    value={filters.minRating}
-                    onChange={(e) => setFilters({ ...filters, minRating: e.target.value })}
-                    placeholder="0 - 5"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="e.g. Manchester, London..."
                     className="h-10 bg-[#0a0a0c] border-[#2a2a2e] text-[#f4f4f5] focus:border-violet-500/50"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-[#6c6c74] mb-1.5 block">Min Score</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={filters.minScore}
-                    onChange={(e) => setFilters({ ...filters, minScore: e.target.value })}
-                    placeholder="0 - 100"
-                    className="h-10 bg-[#0a0a0c] border-[#2a2a2e] text-[#f4f4f5] focus:border-violet-500/50"
-                  />
+                <div className="flex items-end">
+                  <div className="flex items-center gap-2 text-xs text-[#6c6c74]">
+                    <Sparkles className="w-4 h-4 text-violet-400" />
+                    {kimiApiKey ? 'Kimi AI enabled for analysis' : 'Add Kimi API key for AI analysis'}
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -228,7 +226,6 @@ export default function SearchPage() {
         </AnimatePresence>
       </motion.div>
 
-      {/* AI Processing Animation */}
       <AnimatePresence>
         {isSearching && (
           <motion.div
@@ -261,31 +258,27 @@ export default function SearchPage() {
       </AnimatePresence>
 
       {/* Active Jobs */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-[#f4f4f5]">Active Scout Jobs</h2>
+          <h2 className="text-lg font-semibold text-[#f4f4f5]">Scout History</h2>
           <Badge variant="outline" className="border-[#2a2a2e] text-[#8c8c96]">
             {activeJobs.length} jobs
           </Badge>
         </div>
         <div className="space-y-3">
+          {activeJobs.length === 0 && (
+            <div className="text-center py-12 glass-panel rounded-xl">
+              <Sparkles className="w-8 h-8 text-[#2a2a2e] mx-auto mb-3" />
+              <p className="text-[#6c6c74]">No scout jobs yet. Launch your first search above.</p>
+            </div>
+          )}
           {activeJobs.map((job) => (
-            <motion.div
-              key={job.id}
-              layout
-              className="glass-panel rounded-xl p-5"
-            >
+            <motion.div key={job.id} layout className="glass-panel rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      job.status === 'running' ? 'bg-emerald-500/10' : 'bg-amber-500/10'
-                    }`}
-                  >
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    job.status === 'running' ? 'bg-emerald-500/10' : 'bg-amber-500/10'
+                  }`}>
                     {job.status === 'running' ? (
                       <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
                     ) : job.status === 'completed' ? (
@@ -296,68 +289,17 @@ export default function SearchPage() {
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-[#f4f4f5]">{job.query}</h3>
-                    <p className="text-xs text-[#6c6c74]">
-                      {job.status === 'running' ? `Scanning: ${job.currentSource}` : job.status === 'completed' ? 'Completed' : 'Paused'}
-                    </p>
+                    <p className="text-xs text-[#6c6c74]">{job.status}</p>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {job.status !== 'completed' && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => toggleJobStatus(job.id)}
-                      className="text-[#8c8c96] hover:text-[#f4f4f5]"
-                    >
-                      {job.status === 'running' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-[#8c8c96] hover:text-[#f4f4f5]"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-4 mb-4">
-                <div className="text-center p-3 rounded-lg bg-[#0a0a0c]">
-                  <div className="data-mono text-xl font-semibold text-[#f4f4f5]">{job.leadsFound}</div>
-                  <div className="text-xs text-[#6c6c74]">Leads Found</div>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-[#0a0a0c]">
-                  <div className="data-mono text-xl font-semibold text-[#f4f4f5]">
-                    {job.sourcesScanned}/{job.totalSources}
-                  </div>
-                  <div className="text-xs text-[#6c6c74]">Sources</div>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-[#0a0a0c]">
-                  <div className="data-mono text-xl font-semibold text-violet-400">{job.progress}%</div>
-                  <div className="text-xs text-[#6c6c74]">Progress</div>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-[#0a0a0c]">
-                  <div className="data-mono text-xl font-semibold text-[#f4f4f5] flex items-center justify-center gap-1">
-                    <Clock className="w-4 h-4 text-[#6c6c74]" />
-                    {job.completedAt
-                      ? 'Done'
-                      : `${Math.floor((Date.now() - new Date(job.startedAt).getTime()) / 60000)}m`}
-                  </div>
-                  <div className="text-xs text-[#6c6c74]">Duration</div>
                 </div>
               </div>
 
               <div className="h-2 bg-[#1c1c20] rounded-full overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${job.progress}%` }}
-                  transition={{ duration: 1, ease: 'easeOut' }}
+                <div
                   className={`h-full rounded-full ${
-                    job.status === 'running'
-                      ? 'bg-gradient-to-r from-violet-500 to-indigo-500 progress-striped'
-                      : 'bg-violet-500'
+                    job.status === 'running' ? 'bg-gradient-to-r from-violet-500 to-indigo-500 progress-striped' : 'bg-violet-500'
                   }`}
+                  style={{ width: `${job.progress}%` }}
                 />
               </div>
             </motion.div>
