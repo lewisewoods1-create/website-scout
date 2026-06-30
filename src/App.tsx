@@ -10,6 +10,8 @@ import OutreachPage from './pages/OutreachPage';
 import EmailPage from './pages/EmailPage';
 import KimiPage from './pages/KimiPage';
 import SettingsPage from './pages/SettingsPage';
+import Login from "./pages/Login"
+import NotFound from "./pages/NotFound"
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
           <Route path="/email" element={<EmailPage />} />
           <Route path="/kimi" element={<KimiPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Layout>
     </ToastProvider>

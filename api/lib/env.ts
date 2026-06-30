@@ -14,4 +14,7 @@ export const env = {
   isProduction: process.env.NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
   googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY || "",
+  kimiAuthUrl: required("KIMI_AUTH_URL"),
+  kimiOpenUrl: required("KIMI_OPEN_URL"),
+  ownerUnionId: process.env.OWNER_UNION_ID ?? "",
 };
