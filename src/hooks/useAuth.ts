@@ -1,5 +1,5 @@
 import { trpc } from "@/providers/trpc";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 
 export type UnifiedUser = {
   id: number;
@@ -12,6 +12,7 @@ export type UnifiedUser = {
 
 export function useAuth() {
   const utils = trpc.useUtils();
+  const [timedOut, setTimedOut] = useState(false);
 
   const {
     data: oauthUser,
@@ -19,6 +20,7 @@ export function useAuth() {
   } = trpc.auth.me.useQuery(undefined, {
     staleTime: 1000 * 60 * 5,
     retry: false,
+    enabled: !timedOut,
   });
 
   const {
@@ -27,7 +29,18 @@ export function useAuth() {
   } = trpc.localAuth.me.useQuery(undefined, {
     staleTime: 1000 * 60 * 5,
     retry: false,
+    enabled: !timedOut,
   });
+
+  // Timeout after 5 seconds to prevent infinite loading
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (oauthLoading || localLoading) {
+        setTimedOut(true);
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [oauthLoading, localLoading]);
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: async () => {
@@ -76,7 +89,7 @@ export function useAuth() {
     return null;
   }, [oauthUser, localUser]);
 
-  const isLoading = oauthLoading || localLoading;
+  const isLoading = !timedOut && (oauthLoading || localLoading);
   const isAuthenticated = !!user;
   const isAdmin = user?.role === "admin";
 
