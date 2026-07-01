@@ -16,15 +16,12 @@ import Login from './pages/Login';
 import NotFound from './pages/NotFound';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <ToastProvider>
-      <Layout>{children}</Layout>
-    </ToastProvider>
-  );
+  return <Layout>{children}</Layout>;
 }
 
 export default function App() {
   return (
+    <ToastProvider>
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
@@ -133,5 +130,6 @@ export default function App() {
 
       <Route path="*" element={<NotFound />} />
     </Routes>
+    </ToastProvider>
   );
 }
