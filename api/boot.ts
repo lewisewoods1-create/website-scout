@@ -7,6 +7,10 @@ import { createContext } from "./context";
 import { env } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Paths } from "@contracts/constants";
+import { initDb } from "./queries/connection";
+
+// Initialize database on startup
+initDb();
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
