@@ -1,52 +1,47 @@
 import {
-  pgTable,
-  serial,
-  varchar,
-  text,
-  timestamp,
+  sqliteTable,
   integer,
-  json,
-  boolean,
+  text,
   real,
   index,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 
-// ── Businesses (raw data from external sources like Google Places) ──
-export const businesses = pgTable("businesses", {
-  id: serial("id").primaryKey(),
-  externalId: varchar("external_id", { length: 255 }), // Google Place ID
-  name: varchar("name", { length: 255 }).notNull(),
-  owner: varchar("owner", { length: 255 }),
+// ── Businesses ──
+export const businesses = sqliteTable("businesses", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  externalId: text("external_id"),
+  name: text("name").notNull(),
+  owner: text("owner"),
   address: text("address"),
-  phone: varchar("phone", { length: 50 }),
-  email: varchar("email", { length: 255 }),
-  website: varchar("website", { length: 500 }),
-  socialLinks: json("social_links").$type<Record<string, string>>(),
-  industry: varchar("industry", { length: 100 }),
+  phone: text("phone"),
+  email: text("email"),
+  website: text("website"),
+  socialLinks: text("social_links", { mode: "json" }).$type<Record<string, string>>(),
+  industry: text("industry"),
   openingHours: text("opening_hours"),
   googleRating: real("google_rating"),
   reviewCount: integer("review_count"),
-  city: varchar("city", { length: 100 }),
-  region: varchar("region", { length: 100 }),
-  postcode: varchar("postcode", { length: 20 }),
+  city: text("city"),
+  region: text("region"),
+  postcode: text("postcode"),
   latitude: real("latitude"),
   longitude: real("longitude"),
   description: text("description"),
-  hasWebsite: boolean("has_website").notNull().default(false),
-  source: varchar("source", { length: 100 }).default("google_places"), // google_places, yell, manual
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  hasWebsite: integer("has_website", { mode: "boolean" }).notNull().default(false),
+  source: text("source").default("google_places"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("idx_business_city").on(table.city),
   index("idx_business_industry").on(table.industry),
   index("idx_business_external").on(table.externalId),
 ]);
 
-// ── Leads (enriched businesses with AI scoring & pipeline status) ──
-export const leads = pgTable("leads", {
-  id: serial("id").primaryKey(),
+// ── Leads ──
+export const leads = sqliteTable("leads", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
   businessId: integer("business_id").notNull(),
-  status: varchar("status", { length: 50 }).notNull().default("new"), // new, contacted, qualified, proposal_sent, negotiation, won, lost, archived
-  stage: varchar("stage", { length: 50 }).notNull().default("research"), // research, contacted, negotiation, won, lost
+  status: text("status").notNull().default("new"),
+  stage: text("stage").notNull().default("research"),
   overallScore: integer("overall_score").default(0),
   websiteScore: integer("website_score").default(0),
   seoScore: integer("seo_score").default(0),
@@ -58,12 +53,12 @@ export const leads = pgTable("leads", {
   localPresenceScore: integer("local_presence_score").default(0),
   growthPotential: integer("growth_potential").default(0),
   salesProbability: integer("sales_probability").default(0),
-  priority: varchar("priority", { length: 20 }).default("low"), // low, medium, high, urgent
-  tags: json("tags").$type<string[]>(),
+  priority: text("priority").default("low"),
+  tags: text("tags", { mode: "json" }).$type<string[]>(),
   revenue: integer("revenue"),
-  assignedTo: varchar("assigned_to", { length: 255 }),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  assignedTo: text("assigned_to"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("idx_lead_status").on(table.status),
   index("idx_lead_stage").on(table.stage),
@@ -71,8 +66,8 @@ export const leads = pgTable("leads", {
 ]);
 
 // ── Website Analyses ──
-export const websiteAnalyses = pgTable("website_analyses", {
-  id: serial("id").primaryKey(),
+export const websiteAnalyses = sqliteTable("website_analyses", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
   businessId: integer("business_id").notNull(),
   modernAppearance: integer("modern_appearance").default(0),
   visualQuality: integer("visual_quality").default(0),
@@ -85,7 +80,7 @@ export const websiteAnalyses = pgTable("website_analyses", {
   coreWebVitals: integer("core_web_vitals").default(0),
   mobileResponsiveness: integer("mobile_responsiveness").default(0),
   seoScore: integer("seo_score").default(0),
-  ssl: boolean("ssl").default(false),
+  ssl: integer("ssl", { mode: "boolean" }).default(false),
   pageSpeed: integer("page_speed").default(0),
   brokenLinks: integer("broken_links").default(0),
   images: integer("images").default(0),
@@ -95,116 +90,114 @@ export const websiteAnalyses = pgTable("website_analyses", {
   overallProfessionalism: integer("overall_professionalism").default(0),
   contentQuality: integer("content_quality").default(0),
   trustSignals: integer("trust_signals").default(0),
-  technicalStack: json("technical_stack").$type<string[]>(),
-  cmsDetection: varchar("cms_detection", { length: 100 }),
-  hosting: varchar("hosting", { length: 100 }),
-  analyticsDetection: json("analytics_detection").$type<string[]>(),
-  schema: boolean("schema").default(false),
+  technicalStack: text("technical_stack", { mode: "json" }).$type<string[]>(),
+  cmsDetection: text("cms_detection"),
+  hosting: text("hosting"),
+  analyticsDetection: text("analytics_detection", { mode: "json" }).$type<string[]>(),
+  schema: integer("schema", { mode: "boolean" }).default(false),
   indexing: integer("indexing").default(0),
   performance: integer("performance").default(0),
   estimatedWebsiteAge: integer("estimated_website_age"),
   estimatedLastRedesign: integer("estimated_last_redesign"),
-  outdatedTechnologies: json("outdated_technologies").$type<string[]>(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  outdatedTechnologies: text("outdated_technologies", { mode: "json" }).$type<string[]>(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("idx_analysis_business").on(table.businessId),
 ]);
 
-// ── Scout Jobs (background search tasks) ──
-export const scoutJobs = pgTable("scout_jobs", {
-  id: serial("id").primaryKey(),
-  query: varchar("query", { length: 500 }).notNull(),
-  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, running, paused, completed, failed
+// ── Scout Jobs ──
+export const scoutJobs = sqliteTable("scout_jobs", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  query: text("query").notNull(),
+  status: text("status").notNull().default("pending"),
   progress: integer("progress").default(0),
   leadsFound: integer("leads_found").default(0),
   totalSources: integer("total_sources").default(8),
   sourcesScanned: integer("sources_scanned").default(0),
-  currentSource: varchar("current_source", { length: 255 }),
-  location: varchar("location", { length: 255 }),
-  industry: varchar("industry", { length: 100 }),
-  startedAt: timestamp("started_at"),
-  completedAt: timestamp("completed_at"),
+  currentSource: text("current_source"),
+  location: text("location"),
+  industry: text("industry"),
+  startedAt: integer("started_at", { mode: "timestamp" }),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
   error: text("error"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("idx_scout_status").on(table.status),
 ]);
 
 // ── Email Drafts ──
-export const emailDrafts = pgTable("email_drafts", {
-  id: serial("id").primaryKey(),
+export const emailDrafts = sqliteTable("email_drafts", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
   leadId: integer("lead_id").notNull(),
-  type: varchar("type", { length: 50 }).notNull().default("cold_email"), // cold_email, linkedin, facebook, followup1, followup2, followup3, proposal
-  subject: varchar("subject", { length: 500 }),
+  type: text("type").notNull().default("cold_email"),
+  subject: text("subject"),
   body: text("body"),
   analysis: text("analysis"),
   recommendations: text("recommendations"),
   score: integer("score"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  sent: boolean("sent").default(false),
-  sentAt: timestamp("sent_at"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  sent: integer("sent", { mode: "boolean" }).default(false),
+  sentAt: integer("sent_at", { mode: "timestamp" }),
 }, (table) => [
   index("idx_draft_lead").on(table.leadId),
 ]);
 
 // ── Notes ──
-export const notes = pgTable("notes", {
-  id: serial("id").primaryKey(),
+export const notes = sqliteTable("notes", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
   leadId: integer("lead_id").notNull(),
   content: text("content").notNull(),
-  createdBy: varchar("created_by", { length: 255 }).default("user"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: text("created_by").default("user"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("idx_note_lead").on(table.leadId),
 ]);
 
 // ── User Settings ──
-export const userSettings = pgTable("user_settings", {
-  id: serial("id").primaryKey(),
-  email: varchar("email", { length: 255 }).notNull(),
-  name: varchar("name", { length: 255 }),
-  company: varchar("company", { length: 255 }),
-  notifications: boolean("notifications").default(1),
-  dailyDigest: boolean("daily_digest").default(1),
-  weeklyReport: boolean("weekly_report").default(1),
-  kimiApiKey: varchar("kimi_api_key", { length: 500 }),
-  kimiEndpoint: varchar("kimi_endpoint", { length: 500 }).default("https://api.moonshot.cn/v1"),
-  kimiModel: varchar("kimi_model", { length: 100 }).default("kimi-latest"),
-  kimiEnabled: boolean("kimi_enabled").default(false),
-  googlePlacesApiKey: varchar("google_places_api_key", { length: 500 }),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+export const userSettings = sqliteTable("user_settings", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  email: text("email").notNull(),
+  name: text("name"),
+  company: text("company"),
+  notifications: integer("notifications", { mode: "boolean" }).default(true),
+  dailyDigest: integer("daily_digest", { mode: "boolean" }).default(true),
+  weeklyReport: integer("weekly_report", { mode: "boolean" }).default(true),
+  kimiApiKey: text("kimi_api_key"),
+  kimiEndpoint: text("kimi_endpoint").default("https://api.moonshot.cn/v1"),
+  kimiModel: text("kimi_model").default("kimi-latest"),
+  kimiEnabled: integer("kimi_enabled", { mode: "boolean" }).default(false),
+  googlePlacesApiKey: text("google_places_api_key"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  unionId: varchar("unionId", { length: 255 }).notNull().unique(),
-  name: varchar("name", { length: 255 }),
-  email: varchar("email", { length: 320 }),
+// ── OAuth Users ──
+export const users = sqliteTable("users", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  unionId: text("unionId").notNull().unique(),
+  name: text("name"),
+  email: text("email"),
   avatar: text("avatar"),
-  role: varchar("role", { length: 20 }).default("user").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt")
-    .defaultNow()
-    .notNull()
-,
-  lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
+  role: text("role").default("user").notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  lastSignInAt: integer("lastSignInAt", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 // ── Local Users (email/password auth) ──
-export const localUsers = pgTable("local_users", {
-  id: serial("id").primaryKey(),
-  email: varchar("email", { length: 320 }).notNull().unique(),
-  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
-  name: varchar("name", { length: 255 }),
-  role: varchar("role", { length: 20 }).default("user").notNull(),
-  emailConfirmed: boolean("email_confirmed").default(false),
-  confirmationToken: varchar("confirmation_token", { length: 255 }),
-  resetToken: varchar("reset_token", { length: 255 }),
-  resetTokenExpiry: timestamp("reset_token_expiry"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  lastSignInAt: timestamp("last_sign_in_at").defaultNow().notNull(),
+export const localUsers = sqliteTable("local_users", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name"),
+  role: text("role").default("user").notNull(),
+  emailConfirmed: integer("email_confirmed", { mode: "boolean" }).default(false),
+  confirmationToken: text("confirmation_token"),
+  resetToken: text("reset_token"),
+  resetTokenExpiry: integer("reset_token_expiry", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  lastSignInAt: integer("last_sign_in_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
 export type User = typeof users.$inferSelect;

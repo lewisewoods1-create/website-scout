@@ -1,6 +1,5 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import { env } from "../lib/env";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
 import * as schema from "@db/schema";
 import * as relations from "@db/relations";
 
@@ -10,14 +9,8 @@ let instance: ReturnType<typeof drizzle<typeof fullSchema>>;
 
 export function getDb() {
   if (!instance) {
-    const pool = new Pool({
-      connectionString: env.databaseUrl,
-      ssl: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeoutMillis: 10000,
-    });
-    instance = drizzle(pool, { schema: fullSchema });
+    const sqlite = new Database("./scout.db");
+    instance = drizzle(sqlite, { schema: fullSchema });
   }
   return instance;
 }
