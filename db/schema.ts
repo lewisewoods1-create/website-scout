@@ -63,7 +63,7 @@ export const leads = pgTable("leads", {
   revenue: integer("revenue"),
   assignedTo: varchar("assigned_to", { length: 255 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   index("idx_lead_status").on(table.status),
   index("idx_lead_stage").on(table.stage),
@@ -173,7 +173,7 @@ export const userSettings = pgTable("user_settings", {
   kimiEnabled: boolean("kimi_enabled").default(false),
   googlePlacesApiKey: varchar("google_places_api_key", { length: 500 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const users = pgTable("users", {
@@ -187,7 +187,7 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updatedAt")
     .defaultNow()
     .notNull()
-    .$onUpdate(() => new Date()),
+,
   lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
 });
 
