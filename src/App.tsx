@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router';
+import { Routes, Route, Navigate } from 'react-router';
 import { AuthGuard, AdminGuard } from './components/AuthGuard';
 import Layout from './components/Layout';
 import { ToastProvider } from './hooks/useToast';
@@ -22,114 +22,117 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ToastProvider>
-    <Routes>
-      {/* Public routes */}
-      <Route path="/login" element={<Login />} />
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
 
-      {/* Protected routes */}
-      <Route
-        path="/"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <Dashboard />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/search"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <SearchPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/leads"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <LeadsPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/leads/:id"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <LeadDetailPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/pipeline"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <PipelinePage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/outreach"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <OutreachPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/email"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <EmailPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/kimi"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <KimiPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <AuthGuard>
-            <AppLayout>
-              <SettingsPage />
-            </AppLayout>
-          </AuthGuard>
-        }
-      />
-      <Route
-        path="/admin"
-        element={
-          <AdminGuard>
-            <AppLayout>
-              <AdminDashboard />
-            </AppLayout>
-          </AdminGuard>
-        }
-      />
+        {/* Redirect root to login */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        {/* Protected routes */}
+        <Route
+          path="/dashboard"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <Dashboard />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/search"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <SearchPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/leads"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <LeadsPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/leads/:id"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <LeadDetailPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/pipeline"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <PipelinePage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/outreach"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <OutreachPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/email"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <EmailPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/kimi"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <KimiPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <AuthGuard>
+              <AppLayout>
+                <SettingsPage />
+              </AppLayout>
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <AdminGuard>
+              <AppLayout>
+                <AdminDashboard />
+              </AppLayout>
+            </AdminGuard>
+          }
+        />
+
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </ToastProvider>
   );
 }
