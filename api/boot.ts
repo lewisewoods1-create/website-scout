@@ -28,13 +28,15 @@ app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 export default app;
 
+// Production server setup — no top-level await
 if (env.isProduction) {
-  const { serve } = await import("@hono/node-server");
-  const { serveStaticFiles } = await import("./lib/vite");
-  serveStaticFiles(app);
-
-  const port = parseInt(process.env.PORT || "3000");
-  serve({ fetch: app.fetch, port }, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  import("@hono/node-server").then(({ serve }) => {
+    import("./lib/vite").then(({ serveStaticFiles }) => {
+      serveStaticFiles(app);
+      const port = parseInt(process.env.PORT || "3000");
+      serve({ fetch: app.fetch, port }, () => {
+        console.log(`Server running on http://localhost:${port}/`);
+      });
+    });
   });
 }
