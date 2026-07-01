@@ -8,7 +8,11 @@
   },
   "scripts": {
     "dev": "vite",
+<<<<<<< Updated upstream
     "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --external:better-sqlite3 --define:__filename='import.meta.filename' --define:__dirname='import.meta.dirname' --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
+=======
+    "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --define:__filename='import.meta.filename' --define:__dirname='import.meta.dirname' --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
+>>>>>>> Stashed changes
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "node dist/boot.js",
