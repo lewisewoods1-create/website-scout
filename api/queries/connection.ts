@@ -12,7 +12,10 @@ export function getDb() {
   if (!instance) {
     const pool = new Pool({
       connectionString: env.databaseUrl,
-      ssl: env.isProduction ? { rejectUnauthorized: false } : false,
+      ssl: {
+        rejectUnauthorized: false,
+      },
+      connectionTimeoutMillis: 10000,
     });
     instance = drizzle(pool, { schema: fullSchema });
   }
