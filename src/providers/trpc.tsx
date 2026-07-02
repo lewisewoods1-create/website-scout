@@ -13,14 +13,13 @@ const queryClient = new QueryClient({
 
 // Direct API caller - bypasses tRPC client issues
 async function apiCall<T>(path: string, input?: unknown): Promise<T> {
-  const url = input
-    ? `/api/trpc/${path}?input=${encodeURIComponent(JSON.stringify({ json: input }))}`
-    : `/api/trpc/${path}`;
+  const url = `/api/trpc/${path}`;
 
   const res = await fetch(url, {
     method: input ? "POST" : "GET",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
+    body: input ? JSON.stringify({ json: input }) : undefined,
   });
 
   if (!res.ok) {
