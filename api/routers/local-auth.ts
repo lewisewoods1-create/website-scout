@@ -76,9 +76,10 @@ export const localAuthRouter = createRouter({
         name: input.name || input.email.split("@")[0],
         confirmationToken,
         role: "user",
+        emailConfirmed: true,
       });
 
-      return { success: true, message: "Account created. Please check your email to confirm." };
+      return { success: true, message: "Account created! You can now log in." };
     }),
 
   login: publicQuery
@@ -103,10 +104,6 @@ export const localAuthRouter = createRouter({
       const valid = await bcrypt.compare(input.password, user.passwordHash);
       if (!valid) {
         return { success: false, error: "Invalid email or password" };
-      }
-
-      if (!user.emailConfirmed) {
-        return { success: false, error: "Please confirm your email before logging in" };
       }
 
       await db
