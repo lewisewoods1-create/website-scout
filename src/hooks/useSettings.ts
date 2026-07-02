@@ -15,10 +15,28 @@ export type Settings = {
   googlePlacesApiKey?: string;
 };
 
-async function apiCall<T>(path: string, input?: unknown): Promise<T> {
+async function apiGet<T>(path: string, input?: unknown): Promise<T> {
+  // For tRPC queries, use GET with ?input= query param
+  let url = `/api/trpc/${path}`;
+  if (input) {
+    const inputStr = encodeURIComponent(JSON.stringify({ json: input }));
+    url += `?input=${inputStr}`;
+  }
+  const res = await fetch(url, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.json?.message || `API error: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.result?.data?.json ?? data[0]?.result?.data?.json ?? data;
+}
+
+async function apiPost<T>(path: string, input?: unknown): Promise<T> {
   const url = `/api/trpc/${path}`;
   const res = await fetch(url, {
-    method: input ? "POST" : "GET",
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: input ? JSON.stringify({ json: input }) : undefined,
@@ -37,7 +55,7 @@ export function useSettings() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const data = await apiCall<Settings>("settings.get", { email: DEFAULT_EMAIL });
+      const data = await apiGet<Settings>("settings.get", { email: DEFAULT_EMAIL });
       setSettings(data);
     } catch {
       setSettings(null);
@@ -51,7 +69,7 @@ export function useSettings() {
   }, [fetchSettings]);
 
   const upsert = useCallback(async (values: Partial<Settings>) => {
-    const data = await apiCall<Settings>("settings.upsert", {
+    const data = await apiPost<Settings>("settings.upsert", {
       email: DEFAULT_EMAIL,
       ...values,
     });
@@ -60,7 +78,7 @@ export function useSettings() {
   }, []);
 
   const testKimi = useCallback(async (apiKey: string) => {
-    return apiCall<{ ok: boolean; model?: string; error?: string }>("settings.testKimi", { apiKey });
+    return apiPost<{ ok: boolean; model?: string; error?: string }>("settings.testKimi", { apiKey });
   }, []);
 
   return {
