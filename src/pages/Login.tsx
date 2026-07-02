@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { trpc } from "@/providers/trpc";
+import { useApiMutation } from "@/providers/trpc";
 import { useToast } from "@/hooks/useToast";
 import { Sparkles, Mail, Lock, ArrowRight, Eye, EyeOff } from "lucide-react";
 
@@ -27,55 +27,51 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loginMutation = trpc.localAuth.login.useMutation({
-    onSuccess: (data) => {
-      if (data.success) {
-        addToast("Login successful!", "success");
-        window.location.href = "/";
-      } else {
-        addToast(data.error || "Login failed", "error");
-      }
-    },
-    onError: (err) => addToast(err.message, "error"),
-  });
+  const loginMutation = useApiMutation<{ email: string; password: string }, { success: boolean; error?: string; user?: { id: number; email: string; name?: string; role: string } }>("localAuth.login");
 
-  const registerMutation = trpc.localAuth.register.useMutation({
-    onSuccess: (data) => {
-      if (data.success) {
-        addToast(data.message || "Account created!", "success");
-        setMode("login");
-      } else {
-        addToast(data.error || "Signup failed", "error");
-      }
-    },
-    onError: (err) => addToast(err.message, "error"),
-  });
+  const registerMutation = useApiMutation<{ email: string; password: string; name?: string }, { success: boolean; error?: string; message?: string }>("localAuth.register");
 
-  const forgotMutation = trpc.localAuth.requestPasswordReset.useMutation({
-    onSuccess: (data) => {
-      addToast(data.message || "Reset link sent!", "success");
-      setMode("login");
-    },
-    onError: (err) => addToast(err.message, "error"),
-  });
+  const forgotMutation = useApiMutation<{ email: string }, { success: boolean; message?: string; error?: string }>("localAuth.requestPasswordReset");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === "login") {
-      loginMutation.mutate({ email, password });
-    } else if (mode === "signup") {
-      if (password.length < 6) {
-        addToast("Password must be at least 6 characters", "error");
-        return;
+    setIsSubmitting(true);
+    try {
+      if (mode === "login") {
+        const data = await loginMutation.mutateAsync({ email, password });
+        if (data.success) {
+          addToast("Login successful!", "success");
+          window.location.href = "/";
+        } else {
+          addToast(data.error || "Login failed", "error");
+        }
+      } else if (mode === "signup") {
+        if (password.length < 6) {
+          addToast("Password must be at least 6 characters", "error");
+          setIsSubmitting(false);
+          return;
+        }
+        const data = await registerMutation.mutateAsync({ email, password, name: name || undefined });
+        if (data.success) {
+          addToast(data.message || "Account created!", "success");
+          setMode("login");
+        } else {
+          addToast(data.error || "Signup failed", "error");
+        }
+      } else if (mode === "forgot") {
+        const data = await forgotMutation.mutateAsync({ email });
+        addToast(data.message || "Reset link sent!", "success");
+        setMode("login");
       }
-      registerMutation.mutate({ email, password, name: name || undefined });
-    } else if (mode === "forgot") {
-      forgotMutation.mutate({ email });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      addToast(message, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
-
-  const isSubmitting = loginMutation.isPending || registerMutation.isPending || forgotMutation.isPending;
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] flex items-center justify-center p-4">
@@ -84,7 +80,6 @@ export default function Login() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-sm"
       >
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-violet-500/10 border border-violet-500/20 mb-4">
             <Sparkles className="w-7 h-7 text-violet-400" />
@@ -93,7 +88,6 @@ export default function Login() {
           <p className="text-sm text-[#6c6c74] mt-1">AI-powered business discovery</p>
         </div>
 
-        {/* Card */}
         <div className="glass-panel rounded-xl p-6">
           <AnimatePresence mode="wait">
             <motion.div
@@ -159,19 +153,14 @@ export default function Login() {
                   disabled={isSubmitting}
                   className="w-full bg-violet-600 hover:bg-violet-700 text-white"
                 >
-                  {isSubmitting ? (
-                    "Please wait..."
-                  ) : mode === "login" ? (
+                  {isSubmitting ? "Please wait..." : mode === "login" ? (
                     <span className="flex items-center gap-2">Sign in <ArrowRight className="w-4 h-4" /></span>
                   ) : mode === "signup" ? (
                     <span className="flex items-center gap-2">Create account <ArrowRight className="w-4 h-4" /></span>
-                  ) : (
-                    "Send reset link"
-                  )}
+                  ) : "Send reset link"}
                 </Button>
               </form>
 
-              {/* Toggle mode */}
               <div className="mt-4 text-center text-sm text-[#6c6c74]">
                 {mode === "login" ? (
                   <>
@@ -195,7 +184,6 @@ export default function Login() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Divider */}
           <div className="relative my-5">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-[#2a2a2e]" />
@@ -205,7 +193,6 @@ export default function Login() {
             </div>
           </div>
 
-          {/* OAuth */}
           <Button
             variant="outline"
             className="w-full border-[#2a2a2e] text-[#8c8c96] hover:bg-[#1c1c20] hover:text-[#f4f4f5]"
@@ -215,7 +202,6 @@ export default function Login() {
           </Button>
         </div>
 
-        {/* Footer */}
         <p className="text-center text-xs text-[#4a4a52] mt-6">
           By signing in, you agree to our Terms of Service and Privacy Policy.
         </p>

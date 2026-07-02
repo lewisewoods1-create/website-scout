@@ -16,14 +16,36 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
-app.use("/api/trpc/*", async (c) => {
+
+// tRPC handler — POST requests need body forwarded properly
+app.on(["GET", "POST"], "/api/trpc/*", async (c) => {
+  const req = c.req.raw;
+  
+  // For POST requests, ensure body is readable by creating a new Request
+  if (req.method === "POST") {
+    const bodyText = await req.text();
+    const newReq = new Request(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: bodyText,
+    });
+    
+    return fetchRequestHandler({
+      endpoint: "/api/trpc",
+      req: newReq,
+      router: appRouter,
+      createContext,
+    });
+  }
+  
   return fetchRequestHandler({
     endpoint: "/api/trpc",
-    req: c.req.raw,
+    req,
     router: appRouter,
     createContext,
   });
 });
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 export default app;
