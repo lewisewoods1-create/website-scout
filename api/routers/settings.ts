@@ -72,7 +72,13 @@ export const settingsRouter = createRouter({
         });
       }
 
-      return { success: true };
+      // Return the saved settings
+      const saved = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.email, input.email))
+        .limit(1);
+      return saved[0] || { success: true };
     }),
 
   // ── Test Kimi connection ──

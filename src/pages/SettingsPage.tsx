@@ -19,22 +19,36 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/hooks/useToast';
+import { useEffect } from 'react';
 
 export default function SettingsPage() {
   const { addToast } = useToast();
   const { settings, upsert, testKimi: testKimiApi } = useSettings();
 
-  const [name, setName] = useState(settings?.name || 'Alex Johnson');
-  const [company, setCompany] = useState(settings?.company || 'WebDev Pro');
-  const [kimiKey, setKimiKey] = useState(settings?.kimiApiKey || '');
-  const [kimiModel, setKimiModel] = useState(settings?.kimiModel || 'kimi-latest');
-  const [googleKey, setGoogleKey] = useState(settings?.googlePlacesApiKey || '');
-  const [notifications, setNotifications] = useState(settings?.notifications || false);
-  const [dailyDigest, setDailyDigest] = useState(settings?.dailyDigest || false);
+  const [name, setName] = useState('Alex Johnson');
+  const [company, setCompany] = useState('WebDev Pro');
+  const [kimiKey, setKimiKey] = useState('');
+  const [kimiModel, setKimiModel] = useState('kimi-latest');
+  const [googleKey, setGoogleKey] = useState('');
+  const [notifications, setNotifications] = useState(false);
+  const [dailyDigest, setDailyDigest] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [saving, setSaving] = useState(false);
   const [testingKimi, setTestingKimi] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; error?: string } | null>(null);
+
+  // Sync form fields when settings load from server
+  useEffect(() => {
+    if (settings) {
+      setName(settings.name || 'Alex Johnson');
+      setCompany(settings.company || 'WebDev Pro');
+      setKimiKey(settings.kimiApiKey || '');
+      setKimiModel(settings.kimiModel || 'kimi-latest');
+      setGoogleKey(settings.googlePlacesApiKey || '');
+      setNotifications(settings.notifications || false);
+      setDailyDigest(settings.dailyDigest || false);
+    }
+  }, [settings]);
 
   const handleTestKimi = async () => {
     if (!kimiKey) return;
