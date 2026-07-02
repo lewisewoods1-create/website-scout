@@ -17,47 +17,59 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { trpc } from '@/providers/trpc';
 import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/hooks/useToast';
 
-const DEFAULT_EMAIL = 'user@example.com';
-
 export default function SettingsPage() {
   const { addToast } = useToast();
-  const { settings, upsert } = useSettings();
+  const { settings, upsert, testKimi: testKimiApi } = useSettings();
 
   const [name, setName] = useState(settings?.name || 'Alex Johnson');
   const [company, setCompany] = useState(settings?.company || 'WebDev Pro');
   const [kimiKey, setKimiKey] = useState(settings?.kimiApiKey || '');
   const [kimiModel, setKimiModel] = useState(settings?.kimiModel || 'kimi-latest');
   const [googleKey, setGoogleKey] = useState(settings?.googlePlacesApiKey || '');
-  const [notifications, setNotifications] = useState(settings?.notifications === 1);
-  const [dailyDigest, setDailyDigest] = useState(settings?.dailyDigest === 1);
+  const [notifications, setNotifications] = useState(settings?.notifications || false);
+  const [dailyDigest, setDailyDigest] = useState(settings?.dailyDigest || false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [saving, setSaving] = useState(false);
+  const [testingKimi, setTestingKimi] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; error?: string } | null>(null);
 
-  const testKimi = trpc.settings.testKimi.useMutation({
-    onSuccess: (data) => {
-      if (data.ok) addToast(`Kimi connected! Model: ${data.model}`, 'success');
-      else addToast(`Connection failed: ${data.error}`, 'error');
-    },
-  });
+  const handleTestKimi = async () => {
+    if (!kimiKey) return;
+    setTestingKimi(true);
+    setTestResult(null);
+    try {
+      const result = await testKimiApi(kimiKey);
+      setTestResult(result);
+      if (result.ok) addToast(`Kimi connected! Model: ${result.model}`, 'success');
+      else addToast(`Connection failed: ${result.error}`, 'error');
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Test failed', 'error');
+    } finally {
+      setTestingKimi(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
-    await upsert.mutateAsync({
-      email: DEFAULT_EMAIL,
-      name,
-      company,
-      notifications,
-      dailyDigest,
-      kimiApiKey: kimiKey || undefined,
-      googlePlacesApiKey: googleKey || undefined,
-      kimiModel,
-    });
-    setSaving(false);
-    addToast('Settings saved!', 'success');
+    try {
+      await upsert({
+        name,
+        company,
+        notifications,
+        dailyDigest,
+        kimiApiKey: kimiKey || undefined,
+        googlePlacesApiKey: googleKey || undefined,
+        kimiModel,
+      });
+      addToast('Settings saved!', 'success');
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Save failed', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -121,17 +133,17 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex gap-3">
-                <Button variant="outline" onClick={() => testKimi.mutate({ apiKey: kimiKey })}
-                  disabled={!kimiKey || testKimi.isPending}
+                <Button variant="outline" onClick={handleTestKimi}
+                  disabled={!kimiKey || testingKimi}
                   className="border-[#2a2a2e] text-[#8c8c96] gap-2">
-                  {testKimi.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                  {testingKimi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
                   Test Connection
                 </Button>
               </div>
 
-              {testKimi.data && (
-                <div className={`p-3 rounded-lg ${testKimi.data.ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'} text-sm`}>
-                  {testKimi.data.ok ? `Connected! Model: ${testKimi.data.model}` : `Failed: ${testKimi.data.error}`}
+              {testResult && (
+                <div className={`p-3 rounded-lg ${testResult.ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'} text-sm`}>
+                  {testResult.ok ? `Connected! Model: ${testResult.model}` : `Failed: ${testResult.error}`}
                 </div>
               )}
             </div>
