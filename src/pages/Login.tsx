@@ -43,7 +43,7 @@ export default function Login() {
         const data = await loginMutation.mutateAsync({ email, password });
         if (data.success) {
           addToast("Login successful!", "success");
-          window.location.href = "/";
+          window.location.href = "/dashboard";
         } else {
           addToast(data.error || "Login failed", "error");
         }

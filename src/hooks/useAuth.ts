@@ -1,5 +1,4 @@
-import { trpc } from "@/providers/trpc";
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 
 export type UnifiedUser = {
   id: number;
@@ -10,94 +9,85 @@ export type UnifiedUser = {
   authType: "oauth" | "local";
 };
 
-export function useAuth() {
-  const utils = trpc.useUtils();
-  const [timedOut, setTimedOut] = useState(false);
-
-  const {
-    data: oauthUser,
-    isLoading: oauthLoading,
-  } = trpc.auth.me.useQuery(undefined, {
-    staleTime: 1000 * 60 * 5,
-    retry: false,
-    enabled: !timedOut,
-  });
-
-  const {
-    data: localUser,
-    isLoading: localLoading,
-  } = trpc.localAuth.me.useQuery(undefined, {
-    staleTime: 1000 * 60 * 5,
-    retry: false,
-    enabled: !timedOut,
-  });
-
-  // Timeout after 5 seconds to prevent infinite loading
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (oauthLoading || localLoading) {
-        setTimedOut(true);
-      }
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [oauthLoading, localLoading]);
-
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: async () => {
-      await utils.invalidate();
-      window.location.reload();
-    },
-  });
-
-  const localLogoutMutation = trpc.localAuth.logout.useMutation({
-    onSuccess: async () => {
-      await utils.invalidate();
-      window.location.reload();
-    },
-  });
-
-  const logout = useCallback(() => {
-    if (oauthUser) {
-      logoutMutation.mutate();
-    } else if (localUser) {
-      localLogoutMutation.mutate();
-    } else {
-      logoutMutation.mutate();
-    }
-  }, [oauthUser, localUser, logoutMutation, localLogoutMutation]);
-
-  const user: UnifiedUser | null = useMemo(() => {
-    if (oauthUser) {
-      return {
-        id: oauthUser.id,
-        name: oauthUser.name,
-        email: oauthUser.email,
-        avatar: oauthUser.avatar,
-        role: oauthUser.role as "user" | "admin",
-        authType: "oauth" as const,
-      };
-    }
-    if (localUser) {
-      return {
-        id: localUser.id,
-        name: localUser.name,
-        email: localUser.email,
-        role: localUser.role as "user" | "admin",
-        authType: "local" as const,
-      };
-    }
+async function apiCall<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetch(`/api/trpc/${path}`, {
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.result?.data?.json ?? data[0]?.result?.data?.json ?? data ?? null;
+  } catch {
     return null;
-  }, [oauthUser, localUser]);
+  }
+}
 
-  const isLoading = !timedOut && (oauthLoading || localLoading);
-  const isAuthenticated = !!user;
-  const isAdmin = user?.role === "admin";
+export function useAuth() {
+  const [user, setUser] = useState<UnifiedUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      // Try local auth first
+      const local = await apiCall<{
+        id: number; name?: string; email?: string; role: string;
+      }>("localAuth.me");
+      if (local && !cancelled) {
+        setUser({
+          id: local.id,
+          name: local.name,
+          email: local.email,
+          role: local.role as "user" | "admin",
+          authType: "local",
+        });
+        setIsLoading(false);
+        return;
+      }
+      // Try OAuth
+      const oauth = await apiCall<{
+        id: number; name?: string; email?: string; avatar?: string; role: string;
+      }>("auth.me");
+      if (oauth && !cancelled) {
+        setUser({
+          id: oauth.id,
+          name: oauth.name,
+          email: oauth.email,
+          avatar: oauth.avatar,
+          role: oauth.role as "user" | "admin",
+          authType: "oauth",
+        });
+        setIsLoading(false);
+        return;
+      }
+      if (!cancelled) {
+        setUser(null);
+        setIsLoading(false);
+      }
+    }
+    check();
+    return () => { cancelled = true; };
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch("/api/trpc/auth.logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    }).catch(() => {});
+    await fetch("/api/trpc/localAuth.logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    }).catch(() => {});
+    window.location.reload();
+  }, []);
 
   return {
     user,
-    isAuthenticated,
+    isAuthenticated: !!user,
     isLoading,
-    isAdmin,
+    isAdmin: user?.role === "admin",
     logout,
   };
 }
