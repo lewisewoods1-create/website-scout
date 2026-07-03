@@ -8,6 +8,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  console.log('[RENDER] Layout');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   return (

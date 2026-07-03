@@ -33,6 +33,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
+  console.log('[RENDER] Sidebar');
   const location = useLocation();
   const { user, isAdmin, logout } = useAuth();
 

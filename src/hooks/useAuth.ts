@@ -21,7 +21,6 @@ async function apiGet<T>(path: string): Promise<T | null> {
       return null;
     }
     const data = await res.json();
-    // Handle tRPC v11 response format
     const result = data.result?.data?.json ?? data[0]?.result?.data?.json ?? null;
     return result;
   } catch (err) {
@@ -35,13 +34,15 @@ export function useAuth() {
   const [isLoading, setIsLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
+    console.log("[Auth] checkAuth starting...");
     setIsLoading(true);
-    console.log("[Auth] Checking session...");
 
     // Try local auth first
+    console.log("[Auth] Trying localAuth.me...");
     const local = await apiGet<{
       id: number; name?: string; email?: string; role: string;
     }>("localAuth.me");
+    console.log("[Auth] localAuth.me result:", local);
 
     if (local) {
       console.log("[Auth] Local user found:", local.email);
@@ -57,9 +58,11 @@ export function useAuth() {
     }
 
     // Try OAuth
+    console.log("[Auth] Trying auth.me...");
     const oauth = await apiGet<{
       id: number; name?: string; email?: string; avatar?: string; role: string;
     }>("auth.me");
+    console.log("[Auth] auth.me result:", oauth);
 
     if (oauth) {
       console.log("[Auth] OAuth user found:", oauth.email);
@@ -81,12 +84,16 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    console.log("[Auth] Mount effect running");
     checkAuth();
   }, [checkAuth]);
 
-  // Re-check auth when window gains focus (user may have logged in elsewhere)
+  // Re-check auth when window gains focus
   useEffect(() => {
-    const onFocus = () => checkAuth();
+    const onFocus = () => {
+      console.log("[Auth] Window focus, re-checking...");
+      checkAuth();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [checkAuth]);
@@ -105,6 +112,8 @@ export function useAuth() {
     setUser(null);
     window.location.href = "/login";
   }, []);
+
+  console.log(`[Auth] Render: isLoading=${isLoading}, user=${user ? user.email : 'null'}`);
 
   return {
     user,

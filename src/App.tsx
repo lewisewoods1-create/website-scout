@@ -16,10 +16,12 @@ import Login from './pages/Login';
 import NotFound from './pages/NotFound';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
+  console.log('[RENDER] AppLayout');
   return <Layout>{children}</Layout>;
 }
 
 export default function App() {
+  console.log('[RENDER] App');
   return (
     <ToastProvider>
       <Routes>
