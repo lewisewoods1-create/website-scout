@@ -12,11 +12,11 @@ const item = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transiti
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { data: stats, isLoading: statsLoading } = useQuery<{ stages: { stage: string; count: number }[]; totalRevenue: number }>("lead.pipeline");
+  const { data: stats, isLoading: statsLoading } = useQuery<{ stages: Record<string, number>; totalRevenue: number }>("lead.pipeline");
   const { data: recentLeads, isLoading: leadsLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 5, offset: 0 });
 
-  const stageCount = (stage: string) => stats?.stages?.find((s: any) => s.stage === stage)?.count ?? 0;
-  const totalLeads = stats?.stages?.reduce((sum: number, s: any) => sum + (s.count || 0), 0) ?? 0;
+  const stageCount = (stage: string) => stats?.stages?.[stage] ?? 0;
+  const totalLeads = stats?.stages ? Object.values(stats.stages).reduce((sum: number, c) => sum + (c || 0), 0) : 0;
 
   const statCards = [
     { label: 'Total Leads', value: totalLeads, icon: Users, color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },

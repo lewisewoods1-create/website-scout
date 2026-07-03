@@ -25,9 +25,7 @@ const stages: { id: PipelineStage; label: string; color: string }[] = [
 export default function PipelinePage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const { data: pipelineData, isLoading: pipelineLoading } = useQuery<{ stages: { stage: string; count: number }[]; totalRevenue: number }>("lead.pipeline");
+  const { data: pipelineData, isLoading: pipelineLoading } = useQuery<{ stages: Record<string, number>; totalRevenue: number }>("lead.pipeline");
   const { data: leadsData, isLoading: leadsLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
   const updateLead = useMutation<{ id: number; stage: string }, any>("lead.update");
 
@@ -37,8 +35,8 @@ export default function PipelinePage() {
   });
 
   const totalRevenue = pipelineData?.totalRevenue || 0;
-  const pipelineStages = pipelineData?.stages || [];
-  const stageCount = (stage: string) => pipelineStages.find((s: any) => s.stage === stage)?.count ?? 0;
+  const pipelineStages = pipelineData?.stages ?? {};
+  const stageCount = (stage: string) => pipelineStages?.[stage] ?? 0;
 
   const pipelineStatsDisplay = [
     { label: 'Total Leads', value: leads.length, icon: Users, color: 'text-violet-400' },
@@ -48,7 +46,7 @@ export default function PipelinePage() {
 
   const moveStage = async (leadId: number, newStage: string) => {
     await updateLead.mutate({ id: leadId, stage: newStage });
-    setRefreshKey((k) => k + 1);
+    window.location.reload();
   };
 
   const isLoading = pipelineLoading || leadsLoading;
