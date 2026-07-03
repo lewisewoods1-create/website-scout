@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router';
 import {
   Search, Grid3X3, List, MapPin, Star, ArrowUpRight,
-  AlertCircle, SlidersHorizontal, Loader2,
+  AlertCircle, SlidersHorizontal, Loader2, Phone, Globe,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useQuery } from '@/hooks/useApi';
@@ -102,8 +102,14 @@ export default function LeadsPage() {
                     </h3>
                     <div className="flex items-center gap-1 text-xs text-[#6c6c74] mt-1">
                       <MapPin className="w-3 h-3" />
-                      <span className="truncate">{(business?.city as string) || 'Unknown location'}</span>
+                      <span className="truncate">{(business?.address as string) || (business?.city as string) || 'Unknown location'}</span>
                     </div>
+                    {business?.phone ? (
+                      <div className="flex items-center gap-1 text-xs text-[#6c6c74] mt-0.5">
+                        <Phone className="w-3 h-3" />
+                        <span>{business.phone as string}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <ArrowUpRight className="w-4 h-4 text-[#4a4a52] group-hover:text-violet-400 transition-colors" />
                 </div>
@@ -118,6 +124,15 @@ export default function LeadsPage() {
                   }`}>
                     {(lead as Record<string, unknown>).priority as string}
                   </Badge>
+                  {business?.website ? (
+                    <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-400 bg-emerald-500/10">
+                      <Globe className="w-2.5 h-2.5 mr-1" />Has website
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400 bg-red-500/10">
+                      No website
+                    </Badge>
+                  )}
                   {(business?.googleRating as number) ? (
                     <div className="flex items-center gap-1">
                       <Star className="w-3 h-3 text-amber-400" />
