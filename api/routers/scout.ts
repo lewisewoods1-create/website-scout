@@ -73,14 +73,15 @@ export const scoutRouter = createRouter({
 
           const industry = guessIndustry(place.types);
 
-          // Insert business
-          const bizResult = await db.insert(businesses).values({
+          // Insert business with returning ID
+          const bizReturning = await db.insert(businesses).values({
             externalId: place.placeId,
             name: place.name,
             address: place.address,
             phone: place.phone,
             website: place.website,
             industry,
+            description: place.types?.join(", "),
             openingHours: place.openingHours,
             googleRating: place.rating,
             reviewCount: place.reviewCount,
@@ -88,19 +89,21 @@ export const scoutRouter = createRouter({
             longitude: place.longitude,
             city: input.location || null,
             hasWebsite: place.website ? 1 : 0,
-          });
+          }).returning({ id: businesses.id });
 
-          const businessId = Number(bizResult[0].insertId);
+          const businessId = bizReturning[0]?.id;
+          if (!businessId) continue;
 
-          // Create lead
+          // Create lead with returning ID
           const leadResult = await db.insert(leads).values({
             businessId,
             status: "new",
             stage: "research",
             tags: [industry, input.location || "general"].filter(Boolean),
-          });
+          }).returning({ id: leads.id });
 
-          const leadId = Number(leadResult[0].insertId);
+          const leadId = leadResult[0]?.id;
+          if (!leadId) continue;
           leadsFound++;
 
           // If Kimi API key is available, do AI analysis in background

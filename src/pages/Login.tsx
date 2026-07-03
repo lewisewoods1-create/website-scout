@@ -43,7 +43,10 @@ export default function Login() {
         const data = await loginMutation.mutateAsync({ email, password });
         if (data.success) {
           addToast("Login successful!", "success");
-          window.location.href = "/dashboard";
+          // Small delay to let cookie settle, then hard navigate
+          setTimeout(() => {
+            window.location.replace("/dashboard");
+          }, 300);
         } else {
           addToast(data.error || "Login failed", "error");
         }

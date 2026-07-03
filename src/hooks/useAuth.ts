@@ -21,6 +21,7 @@ async function apiGet<T>(path: string): Promise<T | null> {
       return null;
     }
     const data = await res.json();
+    // Handle tRPC v11 response format
     const result = data.result?.data?.json ?? data[0]?.result?.data?.json ?? null;
     return result;
   } catch (err) {
@@ -32,10 +33,10 @@ async function apiGet<T>(path: string): Promise<T | null> {
 export function useAuth() {
   const [user, setUser] = useState<UnifiedUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [checked, setChecked] = useState(false);
 
   const checkAuth = useCallback(async () => {
     setIsLoading(true);
+    console.log("[Auth] Checking session...");
 
     // Try local auth first
     const local = await apiGet<{
@@ -43,6 +44,7 @@ export function useAuth() {
     }>("localAuth.me");
 
     if (local) {
+      console.log("[Auth] Local user found:", local.email);
       setUser({
         id: local.id,
         name: local.name,
@@ -51,7 +53,6 @@ export function useAuth() {
         authType: "local",
       });
       setIsLoading(false);
-      setChecked(true);
       return;
     }
 
@@ -61,6 +62,7 @@ export function useAuth() {
     }>("auth.me");
 
     if (oauth) {
+      console.log("[Auth] OAuth user found:", oauth.email);
       setUser({
         id: oauth.id,
         name: oauth.name,
@@ -70,17 +72,23 @@ export function useAuth() {
         authType: "oauth",
       });
       setIsLoading(false);
-      setChecked(true);
       return;
     }
 
+    console.log("[Auth] No user logged in");
     setUser(null);
     setIsLoading(false);
-    setChecked(true);
   }, []);
 
   useEffect(() => {
     checkAuth();
+  }, [checkAuth]);
+
+  // Re-check auth when window gains focus (user may have logged in elsewhere)
+  useEffect(() => {
+    const onFocus = () => checkAuth();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [checkAuth]);
 
   const logout = useCallback(async () => {
@@ -101,7 +109,7 @@ export function useAuth() {
   return {
     user,
     isAuthenticated: !!user,
-    isLoading: isLoading && !checked,
+    isLoading,
     isAdmin: user?.role === "admin",
     logout,
     refresh: checkAuth,
