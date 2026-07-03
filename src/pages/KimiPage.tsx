@@ -18,22 +18,32 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { trpc } from '@/providers/trpc';
 import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/hooks/useToast';
 import { kimiIntegrationSteps } from '@/data/mockData';
 
 export default function KimiPage() {
   const { addToast } = useToast();
-  const { kimiApiKey } = useSettings();
+  const { kimiApiKey, testKimi: testKimiFn } = useSettings();
   const [activeTab, setActiveTab] = useState('setup');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; error?: string } | null>(null);
 
-  const testKimi = trpc.settings.testKimi.useMutation({
-    onSuccess: (data) => {
-      if (data.ok) addToast(`Kimi connected! Model: ${data.model}`, 'success');
-      else addToast(`Connection failed: ${data.error}`, 'error');
-    },
-  });
+  const handleTestKimi = async () => {
+    if (!kimiApiKey) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testKimiFn(kimiApiKey);
+      setTestResult(result);
+      if (result.ok) addToast(`Kimi connected! Model: ${result.model}`, 'success');
+      else addToast(`Connection failed: ${result.error}`, 'error');
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Test failed', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const copyCode = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -100,9 +110,9 @@ export default function KimiPage() {
               )}
 
               <div className="mt-4 flex gap-3">
-                <Button onClick={() => testKimi.mutate({ apiKey: kimiApiKey || '' })} disabled={!kimiApiKey || testKimi.isPending}
+                <Button onClick={handleTestKimi} disabled={!kimiApiKey || testing}
                   variant="outline" className="border-[#2a2a2e] text-[#8c8c96] gap-2">
-                  {testKimi.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                  {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
                   Test Connection
                 </Button>
                 <Button onClick={() => window.location.href = '/settings'} className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white gap-2">
@@ -110,12 +120,12 @@ export default function KimiPage() {
                 </Button>
               </div>
 
-              {testKimi.data && (
+              {testResult && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                  className={`mt-4 p-4 rounded-lg flex items-center gap-3 ${testKimi.data.ok ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
-                  {testKimi.data.ok ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <Shield className="w-5 h-5 text-red-400" />}
-                  <p className={`text-sm ${testKimi.data.ok ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {testKimi.data.ok ? `Connected! Model: ${testKimi.data.model}` : `Failed: ${testKimi.data.error}`}
+                  className={`mt-4 p-4 rounded-lg flex items-center gap-3 ${testResult.ok ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
+                  {testResult.ok ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <Shield className="w-5 h-5 text-red-400" />}
+                  <p className={`text-sm ${testResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {testResult.ok ? `Connected! Model: ${testResult.model}` : `Failed: ${testResult.error}`}
                   </p>
                 </motion.div>
               )}

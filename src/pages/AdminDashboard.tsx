@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/useToast";
+import { useQuery, useMutation } from "@/hooks/useApi";
 import {
   Users,
   Building2,
@@ -19,39 +19,76 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router";
 
+type UserItem = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  role: string;
+  type: string;
+  createdAt: string | null;
+  lastSignInAt: string | null;
+};
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { user } = useAuth();
   const [userFilter, setUserFilter] = useState<"all" | "oauth" | "local">("all");
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const statsQuery = trpc.admin.stats.useQuery();
-  const usersQuery = trpc.admin.users.useQuery({ type: userFilter });
-  const utils = trpc.useUtils();
+  const { data: stats, isLoading: statsLoading } = useQuery<{
+    businesses: number;
+    leads: number;
+    oauthUsers: number;
+    localUsers: number;
+    scoutJobs: number;
+    emailDrafts: number;
+  }>("admin.stats");
 
-  const updateRole = trpc.admin.updateUserRole.useMutation({
-    onSuccess: () => {
+  const { data: usersData, isLoading: usersLoading } = useQuery<{
+    oauth: UserItem[];
+    local: UserItem[];
+  }>("admin.users", { type: userFilter });
+
+  const updateRoleMutation = useMutation<
+    { userId: number; type: string; role: string },
+    void
+  >("admin.updateUserRole");
+
+  const deleteUserMutation = useMutation<
+    { userId: number; type: string },
+    void
+  >("admin.deleteUser");
+
+  const handleUpdateRole = async (userId: number, type: string, currentRole: string) => {
+    try {
+      await updateRoleMutation.mutate({
+        userId,
+        type,
+        role: currentRole === "admin" ? "user" : "admin",
+      });
       addToast("Role updated", "success");
-      utils.admin.users.invalidate();
-    },
-    onError: (err) => addToast(err.message, "error"),
-  });
+      setRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Update failed", "error");
+    }
+  };
 
-  const deleteUser = trpc.admin.deleteUser.useMutation({
-    onSuccess: () => {
+  const handleDeleteUser = async (userId: number, type: string) => {
+    if (!confirm("Delete this user?")) return;
+    try {
+      await deleteUserMutation.mutate({ userId, type });
       addToast("User deleted", "success");
-      utils.admin.users.invalidate();
-      utils.admin.stats.invalidate();
-    },
-    onError: (err) => addToast(err.message, "error"),
-  });
-
-  const stats = statsQuery.data;
+      setRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Delete failed", "error");
+    }
+  };
 
   const allUsers = [
-    ...(usersQuery.data?.oauth || []),
-    ...(usersQuery.data?.local || []),
-  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    ...(usersData?.oauth || []),
+    ...(usersData?.local || []),
+  ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -86,7 +123,7 @@ export default function AdminDashboard() {
             className="glass-panel rounded-xl p-4"
           >
             <stat.icon className={`w-5 h-5 ${stat.color} mb-2`} />
-            <div className="data-mono text-xl font-bold text-[#f4f4f5]">{stat.value}</div>
+            <div className="data-mono text-xl font-bold text-[#f4f4f5]">{statsLoading ? "..." : stat.value}</div>
             <div className="text-[10px] text-[#6c6c74] uppercase tracking-wider">{stat.label}</div>
           </motion.div>
         ))}
@@ -118,7 +155,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {usersQuery.isLoading ? (
+        {usersLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
           </div>
@@ -185,13 +222,7 @@ export default function AdminDashboard() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() =>
-                            updateRole.mutate({
-                              userId: u.id,
-                              type: u.type,
-                              role: u.role === "admin" ? "user" : "admin",
-                            })
-                          }
+                          onClick={() => handleUpdateRole(u.id, u.type, u.role)}
                           className="text-[10px] h-7 px-2 text-[#6c6c74] hover:text-violet-400"
                         >
                           <Shield className="w-3 h-3 mr-1" />
@@ -200,11 +231,7 @@ export default function AdminDashboard() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            if (confirm("Delete this user?")) {
-                              deleteUser.mutate({ userId: u.id, type: u.type });
-                            }
-                          }}
+                          onClick={() => handleDeleteUser(u.id, u.type)}
                           className="text-[10px] h-7 px-2 text-[#6c6c74] hover:text-red-400"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -228,7 +255,7 @@ export default function AdminDashboard() {
           <div>
             <p className="text-sm font-medium text-[#f4f4f5]">{user.name || user.email}</p>
             <p className="text-xs text-[#6c6c74]">
-              {user.authType} • {user.role}
+              {user.authType} &bull; {user.role}
             </p>
           </div>
         </div>

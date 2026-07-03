@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
 import {
   Search,
@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { trpc } from '@/providers/trpc';
+import { useQuery, useMutation } from '@/hooks/useApi';
 import ScoreRing from '@/components/ScoreRing';
 import type { PipelineStage } from '@/types';
 
@@ -25,29 +25,33 @@ const stages: { id: PipelineStage; label: string; color: string }[] = [
 export default function PipelinePage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
-  const utils = trpc.useUtils();
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const pipelineQuery = trpc.lead.pipeline.useQuery();
-  const leadsQuery = trpc.lead.list.useQuery({});
-  const updateLead = trpc.lead.update.useMutation({ onSuccess: () => utils.lead.list.invalidate() });
+  const { data: pipelineData, isLoading: pipelineLoading } = useQuery<{ stages: { stage: string; count: number }[]; totalRevenue: number }>("lead.pipeline");
+  const { data: leadsData, isLoading: leadsLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
+  const updateLead = useMutation<{ id: number; stage: string }, any>("lead.update");
 
-  const leads = (leadsQuery.data?.items || []).filter((l) => {
-    const business = (l as Record<string, unknown>).business as Record<string, unknown> | undefined;
+  const leads = (leadsData?.items || []).filter((l: any) => {
+    const business = l?.business as Record<string, unknown> | undefined;
     return !searchTerm || (business?.name as string || '').toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  const totalRevenue = pipelineQuery.data?.totalRevenue || 0;
-  const pipelineStats = pipelineQuery.data?.stages || {};
+  const totalRevenue = pipelineData?.totalRevenue || 0;
+  const pipelineStages = pipelineData?.stages || [];
+  const stageCount = (stage: string) => pipelineStages.find((s: any) => s.stage === stage)?.count ?? 0;
 
   const pipelineStatsDisplay = [
     { label: 'Total Leads', value: leads.length, icon: Users, color: 'text-violet-400' },
-    { label: 'In Pipeline', value: (pipelineStats.research || 0) + (pipelineStats.contacted || 0) + (pipelineStats.negotiation || 0), icon: TrendingUp, color: 'text-blue-400' },
+    { label: 'In Pipeline', value: stageCount('research') + stageCount('contacted') + stageCount('negotiation'), icon: TrendingUp, color: 'text-blue-400' },
     { label: 'Won Revenue', value: `£${totalRevenue.toLocaleString()}`, icon: DollarSign, color: 'text-emerald-400' },
   ];
 
-  const moveStage = (leadId: number, newStage: string) => {
-    updateLead.mutate({ id: leadId, stage: newStage });
+  const moveStage = async (leadId: number, newStage: string) => {
+    await updateLead.mutate({ id: leadId, stage: newStage });
+    setRefreshKey((k) => k + 1);
   };
+
+  const isLoading = pipelineLoading || leadsLoading;
 
   return (
     <div className="space-y-6">
@@ -74,19 +78,19 @@ export default function PipelinePage() {
               <stat.icon className={`w-6 h-6 ${stat.color}`} />
             </div>
             <div>
-              <p className="data-mono text-2xl font-semibold text-[#f4f4f5]">{stat.value}</p>
+              <p className="data-mono text-2xl font-semibold text-[#f4f4f5]">{isLoading ? '...' : stat.value}</p>
               <p className="text-xs text-[#6c6c74]">{stat.label}</p>
             </div>
           </div>
         ))}
       </motion.div>
 
-      {leadsQuery.isLoading ? (
+      {isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 text-violet-400 animate-spin" /></div>
       ) : (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="flex gap-4 overflow-x-auto pb-4 scrollbar-thin">
           {stages.map((stage) => {
-            const stageLeads = leads.filter((l) => (l as Record<string, unknown>).stage === stage.id);
+            const stageLeads = leads.filter((l: any) => l?.stage === stage.id);
             return (
               <div key={stage.id} className="min-w-[300px] max-w-[340px] flex-1">
                 <div className={`flex items-center justify-between mb-3 pb-3 border-b-2 ${stage.color}`}>
@@ -96,9 +100,9 @@ export default function PipelinePage() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  {stageLeads.map((item, i) => {
+                  {stageLeads.map((item: any, i: number) => {
                     const lead = item as Record<string, unknown>;
-                    const business = lead.business as Record<string, unknown> | undefined;
+                    const business = lead?.business as Record<string, unknown> | undefined;
                     return (
                       <motion.div key={String(lead.id)} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * i }}
                         className="glass-panel rounded-xl p-4 cursor-pointer hover:border-violet-500/30 transition-all group"
@@ -107,14 +111,14 @@ export default function PipelinePage() {
                           <h4 className="text-sm font-medium text-[#f4f4f5] group-hover:text-violet-400 transition-colors line-clamp-1">{business?.name as string || 'Unknown'}</h4>
                           <ScoreRing score={(lead.overallScore as number) || 0} size={28} strokeWidth={3} showLabel={false} />
                         </div>
-                        <p className="text-xs text-[#6c6c74] mb-2">{business?.industry as string || ''} • {business?.city as string || ''}</p>
-                        {(lead.revenue as number) ? <span className="data-mono text-xs text-emerald-400">£{(lead.revenue as number).toLocaleString()}</span> : null}
+                        <p className="text-xs text-[#6c6c74] mb-2">{business?.industry as string || ''} &bull; {business?.city as string || ''}</p>
+                        {(lead.revenue as number) ? <span className="data-mono text-xs text-emerald-400">&pound;{(lead.revenue as number).toLocaleString()}</span> : null}
                         {/* Stage mover */}
                         <div className="flex gap-1 mt-2 pt-2 border-t border-[#2a2a2e]">
                           {stages.filter((s) => s.id !== stage.id).map((s) => (
                             <button key={s.id} onClick={(e) => { e.stopPropagation(); moveStage(lead.id as number, s.id); }}
                               className="text-[10px] px-2 py-0.5 rounded bg-[#1c1c20] text-[#6c6c74] hover:text-violet-400 hover:bg-violet-500/10 transition-all">
-                              → {s.label}
+                              &rarr; {s.label}
                             </button>
                           ))}
                         </div>

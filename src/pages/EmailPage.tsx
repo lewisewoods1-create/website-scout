@@ -7,41 +7,46 @@ import {
   Sparkles,
   Eye,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { trpc } from '@/providers/trpc';
+import { useQuery, useMutation } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
 export default function EmailPage() {
   const { addToast } = useToast();
 
-  const leadsQuery = trpc.lead.list.useQuery({});
-  const allLeads = (leadsQuery.data?.items || []) as Array<Record<string, unknown>>;
+  const { data: leadsData, isLoading: leadsLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
+  const allLeads = (leadsData?.items || []) as Array<Record<string, unknown>>;
 
   const [selectedLead, setSelectedLead] = useState<Record<string, unknown> | null>(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
-  const generateOutreach = trpc.outreach.generate.useMutation({
-    onSuccess: (data) => {
+  const generateMutation = useMutation<{ leadId: number; type: string; kimiApiKey: string }, { content: string; subject?: string; body?: string }>("outreach.generate");
+
+  const handleGenerate = async () => {
+    if (!selectedLead) { addToast('Select a lead first', 'warning'); return; }
+    setGenerating(true);
+    try {
+      const data = await generateMutation.mutate({
+        leadId: selectedLead.id as number,
+        type: 'cold_email',
+        kimiApiKey: 'placeholder',
+      });
       setSubject(data.subject || '');
       setBody(data.body || data.content);
       addToast('AI email generated!', 'success');
-    },
-    onError: (err) => addToast(err.message, 'error'),
-  });
-
-  const handleGenerate = () => {
-    if (!selectedLead) { addToast('Select a lead first', 'warning'); return; }
-    generateOutreach.mutate({
-      leadId: selectedLead.id as number,
-      type: 'cold_email',
-      kimiApiKey: 'placeholder', // Will be read from settings on backend
-    });
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Generation failed', 'error');
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleSend = async () => {
@@ -68,25 +73,29 @@ export default function EmailPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <div className="glass-panel rounded-xl p-5">
             <h3 className="text-sm font-semibold text-[#f4f4f5] mb-4">Select Recipient</h3>
-            <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar-thin pr-1">
-              {allLeads.map((lead) => {
-                const business = lead.business as Record<string, unknown> | undefined;
-                return (
-                  <button key={String(lead.id)} onClick={() => { setSelectedLead(lead); setSubject(''); setBody(''); }}
-                    className={`w-full text-left p-3 rounded-lg transition-all ${selectedLead?.id === lead.id ? 'bg-violet-500/10 border border-violet-500/30' : 'hover:bg-white/5 border border-transparent'}`}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center text-xs text-white font-medium shrink-0">
-                        {String(business?.name || 'B')[0]}
+            {leadsLoading ? (
+              <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
+            ) : (
+              <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar-thin pr-1">
+                {allLeads.map((lead) => {
+                  const business = lead.business as Record<string, unknown> | undefined;
+                  return (
+                    <button key={String(lead.id)} onClick={() => { setSelectedLead(lead); setSubject(''); setBody(''); }}
+                      className={`w-full text-left p-3 rounded-lg transition-all ${selectedLead?.id === lead.id ? 'bg-violet-500/10 border border-violet-500/30' : 'hover:bg-white/5 border border-transparent'}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-indigo-500 flex items-center justify-center text-xs text-white font-medium shrink-0">
+                          {String(business?.name || 'B')[0]}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-medium truncate ${selectedLead?.id === lead.id ? 'text-violet-400' : 'text-[#f4f4f5]'}`}>{business?.name as string || 'Unknown'}</p>
+                          <p className="text-xs text-[#6c6c74] truncate">{business?.email as string || 'No email'}</p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className={`text-sm font-medium truncate ${selectedLead?.id === lead.id ? 'text-violet-400' : 'text-[#f4f4f5]'}`}>{business?.name as string || 'Unknown'}</p>
-                        <p className="text-xs text-[#6c6c74] truncate">{business?.email as string || 'No email'}</p>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -104,9 +113,9 @@ export default function EmailPage() {
                       <p className="text-xs text-[#6c6c74]">{(selectedLead.business as Record<string, unknown>)?.email as string || ''}</p>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" onClick={handleGenerate} disabled={generateOutreach.isPending}
+                  <Button variant="outline" size="sm" onClick={handleGenerate} disabled={generating}
                     className="border-violet-500/30 text-violet-400 hover:bg-violet-500/10 gap-2">
-                    <Sparkles className="w-4 h-4" /> AI Generate
+                    {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI Generate
                   </Button>
                 </div>
 

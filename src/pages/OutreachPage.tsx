@@ -12,39 +12,24 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { trpc } from '@/providers/trpc';
+import { useQuery, useMutation } from '@/hooks/useApi';
 import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/hooks/useToast';
 
 export default function OutreachPage() {
   const { addToast } = useToast();
   const { kimiApiKey } = useSettings();
-  const utils = trpc.useUtils();
 
-  const leadsQuery = trpc.lead.list.useQuery({});
-  const allLeads = (leadsQuery.data?.items || []) as Array<Record<string, unknown>>;
+  const { data: leadsData, isLoading: leadsLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
+  const allLeads = (leadsData?.items || []) as Array<Record<string, unknown>>;
 
   const [selectedLead, setSelectedLead] = useState<Record<string, unknown> | null>(null);
   const [generatingType, setGeneratingType] = useState<string | null>(null);
   const [generated, setGenerated] = useState<Record<string, { content: string; subject?: string; body?: string }>>({});
 
-  const generateOutreach = trpc.outreach.generate.useMutation({
-    onSuccess: (data, vars) => {
-      setGenerated((prev) => ({
-        ...prev,
-        [vars.type]: { content: data.content, subject: data.subject || undefined, body: data.body || undefined },
-      }));
-      setGeneratingType(null);
-      addToast(`${vars.type} generated!`, 'success');
-      utils.outreach.list.invalidate();
-    },
-    onError: (err) => {
-      setGeneratingType(null);
-      addToast(err.message, 'error');
-    },
-  });
+  const generateMutation = useMutation<{ leadId: number; type: string; kimiApiKey: string }, { content: string; subject?: string; body?: string }>("outreach.generate");
 
-  const handleGenerate = (type: string) => {
+  const handleGenerate = async (type: string) => {
     if (!selectedLead) {
       addToast('Select a lead first', 'warning');
       return;
@@ -54,11 +39,22 @@ export default function OutreachPage() {
       return;
     }
     setGeneratingType(type);
-    generateOutreach.mutate({
-      leadId: selectedLead.id as number,
-      type: type as Parameters<typeof generateOutreach.mutate>[0]['type'],
-      kimiApiKey,
-    });
+    try {
+      const data = await generateMutation.mutate({
+        leadId: selectedLead.id as number,
+        type,
+        kimiApiKey,
+      });
+      setGenerated((prev) => ({
+        ...prev,
+        [type]: { content: data.content, subject: data.subject || undefined, body: data.body || undefined },
+      }));
+      addToast(`${type} generated!`, 'success');
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Generation failed', 'error');
+    } finally {
+      setGeneratingType(null);
+    }
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -102,7 +98,7 @@ export default function OutreachPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <div className="glass-panel rounded-xl p-5">
             <h3 className="text-sm font-semibold text-[#f4f4f5] mb-4">Select Lead</h3>
-            {leadsQuery.isLoading ? (
+            {leadsLoading ? (
               <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
             ) : allLeads.length === 0 ? (
               <p className="text-[#6c6c74] text-center py-8">No leads yet. Run a scout first.</p>
@@ -120,7 +116,7 @@ export default function OutreachPage() {
                         </div>
                         <div className="min-w-0">
                           <p className={`text-sm font-medium truncate ${selectedLead?.id === lead.id ? 'text-violet-400' : 'text-[#f4f4f5]'}`}>{business?.name as string || 'Unknown'}</p>
-                          <p className="text-xs text-[#6c6c74] truncate">{business?.industry as string || ''} • {lead.overallScore as number || 0} score</p>
+                          <p className="text-xs text-[#6c6c74] truncate">{business?.industry as string || ''} &bull; {lead.overallScore as number || 0} score</p>
                         </div>
                       </div>
                     </button>
