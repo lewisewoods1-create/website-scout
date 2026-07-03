@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, publicQuery, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { scoutJobs, businesses, leads, userSettings } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -36,14 +36,15 @@ export const scoutRouter = createRouter({
     }),
 
   // ── Execute a search (find real businesses) ──
-  execute: publicQuery
+  execute: authedQuery
     .input(z.object({
       query: z.string().min(1),
       location: z.string().optional(),
       kimiApiKey: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const user = ctx.user;
 
       // Read API keys from settings
       const settings = await db.select().from(userSettings).limit(1);
@@ -94,9 +95,11 @@ export const scoutRouter = createRouter({
           const businessId = bizReturning[0]?.id;
           if (!businessId) continue;
 
-          // Create lead with returning ID
+          // Create lead with returning ID, scoped to current user
           const leadResult = await db.insert(leads).values({
             businessId,
+            userId: user.id,
+            authType: user.authType,
             status: "new",
             stage: "research",
             tags: [industry, input.location || "general"].filter(Boolean),

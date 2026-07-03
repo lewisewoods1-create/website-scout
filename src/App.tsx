@@ -28,8 +28,8 @@ export default function App() {
         {/* Public routes */}
         <Route path="/login" element={<Login />} />
 
-        {/* Redirect root to login */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
+        {/* Redirect root to dashboard (AuthGuard handles login redirect) */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
         {/* Protected routes */}
         <Route

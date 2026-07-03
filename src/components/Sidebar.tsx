@@ -17,7 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const navItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/search', icon: Search, label: 'AI Scout' },
   { path: '/leads', icon: Users, label: 'Leads' },
   { path: '/pipeline', icon: Kanban, label: 'Pipeline' },

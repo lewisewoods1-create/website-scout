@@ -10,6 +10,10 @@ export async function apiGet<T>(path: string, input?: unknown): Promise<T> {
   console.log(`[API GET] ${url}`);
   const res = await fetch(url, { credentials: "include" });
   console.log(`[API GET] ${path} status: ${res.status}`);
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Session expired. Redirecting to login...");
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => "{}");
     console.error(`[API GET] ${path} error: ${errText}`);
@@ -29,6 +33,10 @@ export async function apiPost<T>(path: string, input?: unknown): Promise<T> {
     body: input ? JSON.stringify({ json: input }) : undefined,
   });
   console.log(`[API POST] ${path} status: ${res.status}`);
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Session expired. Redirecting to login...");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     console.error(`[API POST] ${path} error:`, err);

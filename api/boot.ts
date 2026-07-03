@@ -17,14 +17,19 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
-// tRPC handler — pass the raw request directly to tRPC
+// tRPC handler — properly copy response headers (cookies) back to Hono
 app.use("/api/trpc/*", async (c) => {
-  return fetchRequestHandler({
+  const trpcResponse = await fetchRequestHandler({
     endpoint: "/api/trpc",
     req: c.req.raw,
     router: appRouter,
     createContext,
   });
+  // Copy all headers from tRPC response (including set-cookie)
+  trpcResponse.headers.forEach((value, key) => {
+    c.header(key, value);
+  });
+  return c.body(trpcResponse.body, trpcResponse.status as any);
 });
 
 // Debug REST endpoints — bypass tRPC for direct DB inspection

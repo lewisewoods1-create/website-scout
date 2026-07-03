@@ -40,6 +40,8 @@ export const businesses = sqliteTable("businesses", {
 export const leads = sqliteTable("leads", {
   id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
   businessId: integer("business_id").notNull(),
+  userId: integer("user_id"),
+  authType: text("auth_type"),
   status: text("status").notNull().default("new"),
   stage: text("stage").notNull().default("research"),
   overallScore: integer("overall_score").default(0),
@@ -63,6 +65,7 @@ export const leads = sqliteTable("leads", {
   index("idx_lead_status").on(table.status),
   index("idx_lead_stage").on(table.stage),
   index("idx_lead_priority").on(table.priority),
+  index("idx_lead_user").on(table.userId),
 ]);
 
 // ── Website Analyses ──
