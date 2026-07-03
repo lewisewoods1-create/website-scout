@@ -1,17 +1,13 @@
-import type { CookieOptions } from "hono/utils/cookie";
-
-function isLocalhost(headers: Headers): boolean {
-  const host = headers.get("host") || "";
-  return host.startsWith("localhost:") || host.startsWith("127.0.0.1:");
-}
-
-export function getSessionCookieOptions(headers: Headers): CookieOptions {
-  const localhost = isLocalhost(headers);
-
+/**
+ * Returns cookie serialization options appropriate for the current environment.
+ * Uses SameSite=Lax for maximum browser compatibility.
+ */
+export function getSessionCookieOptions(_headers?: Headers) {
+  // Always use Lax for same-origin apps - works with all browsers
   return {
     httpOnly: true,
     path: "/",
-    sameSite: localhost ? "Lax" : "None",
-    secure: !localhost,
+    sameSite: "Lax" as const,
+    secure: true, // Render serves over HTTPS
   };
 }

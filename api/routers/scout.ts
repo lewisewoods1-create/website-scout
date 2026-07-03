@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { scoutJobs, businesses, leads } from "@db/schema";
+import { scoutJobs, businesses, leads, userSettings } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
-import { searchBusinesses, guessIndustry } from "../services/google-places";
+import { searchBusinessesWithKey, guessIndustry } from "../services/google-places";
 import { analyseWebsite as analyseWebsiteService } from "../services/website-analysis";
 import { analyseWebsite as kimiAnalyse } from "../services/kimi";
 
@@ -45,8 +45,17 @@ export const scoutRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
 
+      // Read API keys from settings
+      const settings = await db.select().from(userSettings).limit(1);
+      const googleKey = settings[0]?.googlePlacesApiKey || process.env.GOOGLE_PLACES_API_KEY || "";
+      const kimiKey = input.kimiApiKey || settings[0]?.kimiApiKey || "";
+
+      if (!googleKey) {
+        return { leadsFound: 0, totalScanned: 0, message: "Google Places API key not configured. Add it in Settings > API Keys." };
+      }
+
       // 1. Search Google Places for real businesses
-      const places = await searchBusinesses(input.query, input.location, 20);
+      const places = await searchBusinessesWithKey(googleKey, input.query, input.location, 20);
 
       let leadsFound = 0;
 
@@ -94,8 +103,8 @@ export const scoutRouter = createRouter({
           const leadId = Number(leadResult[0].insertId);
           leadsFound++;
 
-          // If Kimi API key is provided, do AI analysis in background
-          if (input.kimiApiKey) {
+          // If Kimi API key is available, do AI analysis in background
+          if (kimiKey) {
             try {
               // Website tech analysis
               if (place.website) {
@@ -109,7 +118,7 @@ export const scoutRouter = createRouter({
 
               // Kimi AI analysis for scoring
               const kimiResult = await kimiAnalyse(
-                input.kimiApiKey,
+                kimiKey,
                 place.name,
                 place.website || null,
                 industry,
@@ -152,7 +161,7 @@ export const scoutRouter = createRouter({
       return {
         leadsFound,
         totalScanned: places.length,
-        message: `Found ${leadsFound} new businesses${input.kimiApiKey ? " with AI analysis" : ""}`,
+        message: `Found ${leadsFound} new businesses${kimiKey ? " with AI analysis" : ""}`,
       };
     }),
 

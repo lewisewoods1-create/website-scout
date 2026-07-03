@@ -41,13 +41,15 @@ interface RawPlace {
 /**
  * Search for businesses using Google Places Text Search API.
  * This finds REAL businesses in the specified area.
+ * Uses the provided API key or falls back to env var.
  */
-export async function searchBusinesses(
+export async function searchBusinessesWithKey(
+  apiKey: string,
   query: string,
   location?: string,
   maxResults = 20
 ): Promise<PlaceResult[]> {
-  if (!GOOGLE_PLACES_API_KEY) {
+  if (!apiKey) {
     throw new Error("GOOGLE_PLACES_API_KEY not configured. Add it in Settings > API Keys.");
   }
 
@@ -57,7 +59,7 @@ export async function searchBusinesses(
   // Step 1: Text Search to find places
   const textSearchUrl = new URL(`${PLACES_BASE_URL}/textsearch/json`);
   textSearchUrl.searchParams.set("query", searchQuery);
-  textSearchUrl.searchParams.set("key", GOOGLE_PLACES_API_KEY);
+  textSearchUrl.searchParams.set("key", apiKey);
 
   const textResponse = await fetch(textSearchUrl.toString());
   if (!textResponse.ok) {
@@ -80,11 +82,11 @@ export async function searchBusinesses(
 
   for (const place of limited) {
     try {
-      const detail = await getPlaceDetails(place.place_id);
+      const detail = await getPlaceDetailsWithKey(apiKey, place.place_id);
       if (detail) detailed.push(detail);
     } catch {
       // Fallback to basic info if details fail
-      detailed.push(placeToResult(place));
+      detailed.push(placeToResultWithKey(apiKey, place));
     }
   }
 
@@ -92,15 +94,26 @@ export async function searchBusinesses(
 }
 
 /**
- * Get detailed information about a specific place.
+ * Legacy wrapper that uses env var.
  */
-export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
-  if (!GOOGLE_PLACES_API_KEY) return null;
+export async function searchBusinesses(
+  query: string,
+  location?: string,
+  maxResults = 20
+): Promise<PlaceResult[]> {
+  return searchBusinessesWithKey(GOOGLE_PLACES_API_KEY, query, location, maxResults);
+}
+
+/**
+ * Get detailed information about a specific place using a provided API key.
+ */
+export async function getPlaceDetailsWithKey(apiKey: string, placeId: string): Promise<PlaceResult | null> {
+  if (!apiKey) return null;
 
   const detailUrl = new URL(`${PLACES_BASE_URL}/details/json`);
   detailUrl.searchParams.set("place_id", placeId);
   detailUrl.searchParams.set("fields", "place_id,name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,geometry,photos,types,opening_hours,vicinity,business_status");
-  detailUrl.searchParams.set("key", GOOGLE_PLACES_API_KEY);
+  detailUrl.searchParams.set("key", apiKey);
 
   const response = await fetch(detailUrl.toString());
   if (!response.ok) return null;
@@ -108,7 +121,14 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
   const data = await response.json() as { result?: RawPlace; status: string };
   if (data.status !== "OK" || !data.result) return null;
 
-  return placeToResult(data.result);
+  return placeToResult(data.result, apiKey);
+}
+
+/**
+ * Legacy wrapper using env var.
+ */
+export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
+  return getPlaceDetailsWithKey(GOOGLE_PLACES_API_KEY, placeId);
 }
 
 /**
@@ -159,12 +179,15 @@ export async function searchNearby(
 /**
  * Convert raw Google Place data to our PlaceResult format.
  */
-function placeToResult(place: RawPlace): PlaceResult {
-  const photoUrls = (place.photos || [])
-    .slice(0, 3)
-    .map((p) =>
-      `${PLACES_BASE_URL}/photo?maxwidth=400&photo_reference=${p.photo_reference}&key=${GOOGLE_PLACES_API_KEY}`
-    );
+function placeToResult(place: RawPlace, apiKey?: string): PlaceResult {
+  const key = apiKey || GOOGLE_PLACES_API_KEY;
+  const photoUrls = key && (place.photos || []).length > 0
+    ? (place.photos || [])
+        .slice(0, 3)
+        .map((p) =>
+          `${PLACES_BASE_URL}/photo?maxwidth=400&photo_reference=${p.photo_reference}&key=${key}`
+        )
+    : [];
 
   return {
     placeId: place.place_id,

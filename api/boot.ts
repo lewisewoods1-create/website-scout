@@ -17,33 +17,37 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
-// tRPC handler — POST requests need body forwarded properly
+// tRPC handler — forward response headers properly
 app.on(["GET", "POST"], "/api/trpc/*", async (c) => {
   const req = c.req.raw;
-  
-  // For POST requests, ensure body is readable by creating a new Request
+
+  // For POST requests, read body and create a fresh Request for tRPC
+  let trpcReq = req;
   if (req.method === "POST") {
     const bodyText = await req.text();
-    const newReq = new Request(req.url, {
+    trpcReq = new Request(req.url, {
       method: req.method,
       headers: req.headers,
       body: bodyText,
     });
-    
-    return fetchRequestHandler({
-      endpoint: "/api/trpc",
-      req: newReq,
-      router: appRouter,
-      createContext,
-    });
   }
-  
-  return fetchRequestHandler({
+
+  // tRPC needs its own response headers object to set cookies
+  const resHeaders = new Headers();
+
+  const response = await fetchRequestHandler({
     endpoint: "/api/trpc",
-    req,
+    req: trpcReq,
     router: appRouter,
-    createContext,
+    createContext: (opts) => createContext({ req: opts.req, resHeaders }),
   });
+
+  // Merge tRPC response headers (set-cookie etc.) into Hono response
+  resHeaders.forEach((value, key) => {
+    c.res.headers.set(key, value);
+  });
+
+  return response;
 });
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
