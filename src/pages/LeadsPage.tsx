@@ -12,7 +12,7 @@ export default function LeadsPage() {
   const [search, setSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
-  const { data: leadsData, isLoading } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
+  const { data: leadsData, isLoading, error: queryError } = useQuery<{ items: any[]; total: number }>("lead.list", { limit: 100, offset: 0 });
 
   const filteredLeads = useMemo(() => {
     const leads = leadsData?.items || [];
@@ -73,7 +73,13 @@ export default function LeadsPage() {
         </select>
       </div>
 
-      {filteredLeads.length === 0 ? (
+      {queryError ? (
+        <div className="text-center py-16">
+          <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+          <p className="text-red-400 font-medium">Error loading leads</p>
+          <p className="text-sm text-[#6c6c74] mt-1">{queryError.message}</p>
+        </div>
+      ) : filteredLeads.length === 0 ? (
         <div className="text-center py-16">
           <AlertCircle className="w-12 h-12 text-[#4a4a52] mx-auto mb-4" />
           <p className="text-[#6c6c74]">No leads found</p>
