@@ -135,3 +135,14 @@ This skill covers static image prompt enhancement only. It does not cover video 
 
 **Enhanced:** "Golden retriever mid-leap catching a red frisbee, ears flying, tongue out in joy, in a sunlit urban park. Soft morning light filtering through oak trees creates dappled shadows on emerald grass. Background shows families on picnic blankets, slightly out of focus. Shot from low angle emphasizing the dog's athletic movement, with motion blur on the paws suggesting speed."
 
+
+## Generating the image (this repo)
+
+After enhancing the prompt, generate it with Gemini:
+
+```bash
+python3 .claude/skills/image-generation/scripts/gemini-image.py "<enhanced prompt>" \
+  -o .claude/skills/image-generation/output/<name>.png --aspect 16:9
+```
+
+Requires `GEMINI_API_KEY` in the environment. Override the model with `--model` or `GEMINI_IMAGE_MODEL` if the default is unavailable. Then show the saved file to the user.
