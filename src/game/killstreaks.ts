@@ -114,7 +114,9 @@ export class StreakRuntime {
       }
     } else if (id === 'sentry') {
       const obj = buildSentry(h.mats);
-      obj.position.copy(feet).addScaledVector(ahead, 1.6);
+      // ahead and off to the right so it doesn't block your view
+      const right = new THREE.Vector3(-ahead.z, 0, ahead.x);
+      obj.position.copy(feet).addScaledVector(ahead, 2.4).addScaledVector(right, 1.4);
       obj.rotation.y = yaw;
       h.scene.add(obj);
       this.gunners.push({ obj, head: obj.getObjectByName('turret')!, life: 45, cool: 1, range: 34, rate: 0.12, dmg: 16, acc: 0.6, label: 'sentry' });
