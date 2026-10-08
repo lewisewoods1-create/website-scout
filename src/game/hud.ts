@@ -1,8 +1,8 @@
 import type { Box } from './map';
 
 const CSS = `
-#hud { position: fixed; inset: 0; pointer-events: none; font-family: 'VT323', monospace; color: #e8e2d0;
-  text-shadow: 0 0 2px #000, 1px 1px 0 #000; image-rendering: pixelated; user-select: none; }
+#hud { position: fixed; inset: 0; pointer-events: none; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-weight: 600; color: #ece6d4;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8); user-select: none; font-variant-numeric: tabular-nums; }
 #hud .vignette { position: absolute; inset: 0; opacity: 0; transition: opacity .15s;
   background: radial-gradient(ellipse at center, rgba(120,0,0,0) 35%, rgba(150,0,0,.55) 75%, rgba(90,0,0,.9) 100%); }
 #hud .xhair { position: absolute; left: 50%; top: 50%; }
@@ -15,59 +15,59 @@ const CSS = `
 #hud .hit::after { transform: rotate(-45deg); }
 #hud .hit.kill::before, #hud .hit.kill::after { background: linear-gradient(#ff3b2a 0 35%, transparent 35% 65%, #ff3b2a 65%); }
 #hud .ammo { position: absolute; right: 36px; bottom: 28px; text-align: right; }
-#hud .ammo .n { font-size: 64px; line-height: .8; }
-#hud .ammo .n small { font-size: 30px; opacity: .7; }
-#hud .ammo .w { font-size: 22px; letter-spacing: 2px; opacity: .85; }
+#hud .ammo .n { font-size: 52px; line-height: .8; }
+#hud .ammo .n small { font-size: 25px; opacity: .7; }
+#hud .ammo .w { font-size: 18px; letter-spacing: 2px; opacity: .85; }
 #hud .ammo .bullets { display: flex; gap: 2px; justify-content: flex-end; margin-top: 6px; }
 #hud .ammo .bullets b { width: 3px; height: 12px; background: #d8c48a; }
 #hud .ammo .bullets b.spent { background: rgba(255,255,255,.12); }
-#hud .ammo .low { color: #ff5a3a; font-size: 22px; }
-#hud .rank { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: min(520px, 60vw); text-align: center; font-size: 18px; }
+#hud .ammo .low { color: #ff5a3a; font-size: 18px; }
+#hud .rank { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: min(520px, 60vw); text-align: center; font-size: 15px; }
 #hud .rank .bar { height: 5px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.25); margin-top: 3px; }
 #hud .rank .bar i { display: block; height: 100%; background: #e0b23c; width: 0; transition: width .4s; }
-#hud .score { position: absolute; left: 196px; top: 16px; font-size: 22px; line-height: 1.1; }
-#hud .score .big { font-size: 34px; }
-#hud .feed { position: absolute; right: 20px; top: 16px; font-size: 21px; text-align: right; }
+#hud .score { position: absolute; left: 196px; top: 16px; font-size: 18px; line-height: 1.1; }
+#hud .score .big { font-size: 28px; }
+#hud .feed { position: absolute; right: 20px; top: 16px; font-size: 17px; text-align: right; }
 #hud .feed div { animation: feedIn .2s; }
 #hud .feed .you { color: #9fd36b; }
 #hud .feed .enemy { color: #ff6b4a; }
 #hud .popups { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); text-align: center; }
-#hud .popups div { font-size: 28px; color: #f2d36b; animation: pop 1.2s forwards; }
+#hud .popups div { font-size: 23px; color: #f2d36b; animation: pop 1.2s forwards; }
 #hud .popups div.hs { color: #ff9a5a; }
 #hud .banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .3s; }
-#hud .banner .t { font-size: 44px; color: #f2d36b; letter-spacing: 3px; }
-#hud .banner .s { font-size: 22px; }
-#hud .streak { position: absolute; right: 36px; bottom: 150px; font-size: 20px; text-align: right; }
+#hud .banner .t { font-size: 36px; color: #f2d36b; letter-spacing: 3px; }
+#hud .banner .s { font-size: 18px; }
+#hud .streak { position: absolute; right: 36px; bottom: 150px; font-size: 16px; text-align: right; }
 #hud .streak .ready { color: #9fd36b; animation: blink 1s infinite; }
 #hud .dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
 #hud .dmg i { position: absolute; left: -60px; top: -170px; width: 120px; height: 30px; border-radius: 50% 50% 0 0;
   border-top: 6px solid rgba(255,40,20,.85); opacity: 0; transition: opacity .6s; }
-#hud .reload { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font-size: 24px; opacity: 0; }
+#hud .reload { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font-size: 20px; opacity: 0; }
 #hud canvas.map { position: absolute; left: 16px; top: 16px; width: 168px; height: 168px; border: 2px solid rgba(232,226,208,.4);
-  background: rgba(10,14,10,.55); image-rendering: pixelated; }
+  background: rgba(10,14,10,.55); }
 #hud .dead { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
-  background: rgba(60,0,0,.35); font-size: 30px; }
-#hud .dead .t { font-size: 64px; color: #ff5a3a; letter-spacing: 4px; }
-#hud .match { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; font-size: 26px; }
-#hud .match .a { color: #7ec8ff; } #hud .match .e { color: #ff6b4a; } #hud .match .clock { font-size: 22px; opacity: .85; }
+  background: rgba(60,0,0,.35); font-size: 25px; }
+#hud .dead .t { font-size: 52px; color: #ff5a3a; letter-spacing: 4px; }
+#hud .match { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; font-size: 21px; }
+#hud .match .a { color: #7ec8ff; } #hud .match .e { color: #ff6b4a; } #hud .match .clock { font-size: 18px; opacity: .85; }
 #hud .match .bar { width: 110px; height: 6px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2); }
 #hud .match .bar i { display: block; height: 100%; }
 #hud .tags { position: absolute; inset: 0; }
-#hud .tags div { position: absolute; transform: translate(-50%, -100%); font-size: 18px; white-space: nowrap; }
+#hud .tags div { position: absolute; transform: translate(-50%, -100%); font-size: 15px; white-space: nowrap; }
 #hud .tags .f { color: #7ec8ff; } #hud .tags .e { color: #ff5a3a; }
 #hud .tags .f::after { content: ''; display: block; margin: 1px auto 0; width: 0; border: 5px solid transparent; border-top-color: #7ec8ff; }
 #hud .board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(8,8,10,.86);
-  border: 1px solid rgba(232,226,208,.3); padding: 14px 18px; display: none; gap: 20px; font-size: 20px; }
+  border: 1px solid rgba(232,226,208,.3); padding: 14px 18px; display: none; gap: 20px; font-size: 16px; }
 #hud .board table { border-collapse: collapse; min-width: 300px; }
 #hud .board th { text-align: left; font-weight: normal; opacity: .6; padding: 2px 10px; }
 #hud .board td { padding: 2px 10px; font-variant-numeric: tabular-nums; }
 #hud .board tr.me td { background: rgba(242,211,107,.18); }
-#hud .board h3 { margin: 0 0 6px; font-weight: normal; font-size: 26px; }
+#hud .board h3 { margin: 0 0 6px; font-weight: normal; font-size: 21px; }
 #hud .end { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
   background: rgba(5,3,4,.82); pointer-events: auto; gap: 12px; }
-#hud .end .t { font-size: 84px; letter-spacing: 6px; line-height: .9; }
+#hud .end .t { font-size: 69px; letter-spacing: 6px; line-height: .9; }
 #hud .end .win { color: #f2d36b; } #hud .end .lose { color: #ff5a3a; }
-#hud .end button { font-family: inherit; font-size: 32px; letter-spacing: 4px; padding: 4px 34px; cursor: pointer;
+#hud .end button { font-family: inherit; font-size: 26px; letter-spacing: 4px; padding: 4px 34px; cursor: pointer;
   background: #f2d36b; color: #1a1210; border: none; box-shadow: 5px 5px 0 #6b1a10; }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }

@@ -370,9 +370,11 @@ export class Game {
       let minHostile = 80;
       let minFriend = 80;
       let seen = false;
+      let blocked = false;
       for (const o of this.world.combatants) {
         if (o === c || !o.alive) continue;
         const d = Math.hypot(o.pos.x - p.x, o.pos.z - p.z);
+        if (d < 2.5) blocked = true;
         if (this.hostile(c, o)) {
           minHostile = Math.min(minHostile, d);
           if (!seen && d < 45) {
@@ -385,7 +387,7 @@ export class Game {
           minFriend = Math.min(minFriend, d);
         }
       }
-      let score = Math.min(minHostile, 40) - (seen ? 30 : 0) + Math.random() * 5;
+      let score = Math.min(minHostile, 40) - (seen ? 30 : 0) - (blocked ? 100 : 0) + Math.random() * 5;
       if (this.cfg.mode === 'tdm' && this.phase === 'match') score -= minFriend * 0.25;
       if (score > bestScore) {
         bestScore = score;

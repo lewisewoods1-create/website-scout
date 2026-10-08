@@ -93,7 +93,7 @@ export class HybridRenderer {
   private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private blit: THREE.ShaderMaterial;
   private depthOnly = ps1ify(new THREE.MeshBasicMaterial({ colorWrite: false }));
-  lowHeight = 240;
+  lowHeight = 480;
 
   constructor(canvas: HTMLCanvasElement) {
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });

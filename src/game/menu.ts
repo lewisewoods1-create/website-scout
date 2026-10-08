@@ -59,6 +59,7 @@ export class Menu {
 
   private render(animateNav = false) {
     const pause = this.context === 'pause';
+    this.root.classList.toggle('static', !animateNav);
     const items: [Tab, string, string][] = pause
       ? [['resume', 'RESUME', ''], ['cac', 'CREATE A CLASS', 'next spawn'], ['settings', 'SETTINGS', ''], ['quit', 'QUIT MATCH', '']]
       : [['mp', 'MULTIPLAYER', 'offline'], ['bots', 'BOT MATCH', ''], ['cac', 'CREATE A CLASS', ''], ['barracks', 'BARRACKS', ''], ['settings', 'SETTINGS', '']];
@@ -138,7 +139,7 @@ export class Menu {
           <label for="s-sens">SENSITIVITY</label><input id="s-sens" type="range" min="0.2" max="3" step="0.05" value="${s.sensitivity}"><span id="s-sens-v">${s.sensitivity.toFixed(2)}</span>
           <label for="s-fov">FIELD OF VIEW</label><input id="s-fov" type="range" min="65" max="100" step="1" value="${s.fov}"><span id="s-fov-v">${s.fov}°</span>
           <label for="s-vol">VOLUME</label><input id="s-vol" type="range" min="0" max="1" step="0.05" value="${s.volume}"><span id="s-vol-v">${Math.round(s.volume * 100)}%</span>
-          <label for="s-res">WORLD RESOLUTION</label><select id="s-res">${[180, 240, 360, 480].map((r) => `<option value="${r}" ${s.lowHeight === r ? 'selected' : ''}>${r}p${r === 240 ? ' (PS1)' : ''}</option>`).join('')}</select><span></span>
+          <label for="s-res">WORLD RESOLUTION</label><select id="s-res">${[240, 360, 480, 720].map((r) => `<option value="${r}" ${s.lowHeight === r ? 'selected' : ''}>${r}p${r === 240 ? ' (true PS1)' : r === 480 ? ' (default)' : ''}</option>`).join('')}</select><span></span>
           <label for="s-dither">DITHERING</label><input id="s-dither" type="checkbox" ${s.dither ? 'checked' : ''}><span></span>
           <label for="s-unlock">UNLOCK ALL (TESTING)</label><input id="s-unlock" type="checkbox" ${s.unlockAll ? 'checked' : ''}><span></span>
         </div>

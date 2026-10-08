@@ -3,11 +3,18 @@ import { Menu } from './menu';
 import { loadClasses } from './loadout';
 
 const SETTINGS_KEY = 'deadpixel.settings.v1';
-const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 240, volume: 0.7, unlockAll: false };
+const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 480, volume: 0.7, unlockAll: false };
 
 function loadSettings(): Settings {
   try {
-    return { ...defaults, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings> & { v?: number };
+    // v2: default world resolution raised to 480p
+    if ((saved.v ?? 1) < 2) {
+      delete saved.lowHeight;
+      saved.v = 2;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(saved));
+    }
+    return { ...defaults, ...saved };
   } catch {
     return { ...defaults };
   }
@@ -15,7 +22,6 @@ function loadSettings(): Settings {
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const boot = document.getElementById('boot') as HTMLDivElement;
-const scan = document.querySelector('.scan') as HTMLDivElement;
 const settings = loadSettings();
 const classes = loadClasses();
 const game = new Game(canvas, settings);
@@ -24,7 +30,7 @@ game.input.forceActive = debug;
 
 function saveSettings() {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, v: 2 }));
   } catch {
     // ignore
   }
@@ -47,13 +53,11 @@ function lockOrFallback() {
 
 function enterPlay() {
   menu.close();
-  scan.style.display = 'none';
   game.setPaused(false);
 }
 
 function openPause() {
   game.setPaused(true);
-  scan.style.display = '';
   menu.open('pause');
 }
 
@@ -78,7 +82,6 @@ const menu = new Menu({
 
 game.onExit = () => {
   game.quitToMenu();
-  scan.style.display = '';
   menu.open('main');
 };
 
