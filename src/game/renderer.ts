@@ -6,6 +6,8 @@ export const LAYER_WORLD = 0;
 export const LAYER_CHAR = 1;
 /** Low-res effects that must not occlude characters (tracers, puffs, blob shadows). */
 export const LAYER_FX = 3;
+/** Full-res smoke clouds, drawn after characters so they hide them. */
+export const LAYER_SMOKE = 4;
 
 /** Shared uniform: half the low-res framebuffer size, used for vertex snapping. */
 export const snapUniform = { value: new THREE.Vector2(160, 120) };
@@ -100,6 +102,10 @@ export class HybridRenderer {
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.1;
     this.gl.autoClear = false;
+    // soft sun shadows for soldiers, grenades and the world; rendered once per frame
+    this.gl.shadowMap.enabled = true;
+    this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.gl.shadowMap.autoUpdate = false;
     this.lowRT = new THREE.WebGLRenderTarget(320, 240, {
       type: THREE.HalfFloatType,
       magFilter: THREE.NearestFilter,
@@ -145,6 +151,7 @@ export class HybridRenderer {
     vmCamera: THREE.PerspectiveCamera,
   ) {
     const r = this.gl;
+    r.shadowMap.needsUpdate = true;
 
     // 1. low-res world
     scene.background = sky;
@@ -168,6 +175,10 @@ export class HybridRenderer {
 
     // 4. hi-detail characters
     camera.layers.set(LAYER_CHAR);
+    r.render(scene, camera);
+
+    // 4b. smoke clouds over characters
+    camera.layers.set(LAYER_SMOKE);
     r.render(scene, camera);
 
     // 5. viewmodel

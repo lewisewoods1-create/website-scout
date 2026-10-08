@@ -1,8 +1,9 @@
 /**
- * MW2-shaped progression: 70 levels, unlocks on level-up, XP per action.
- * Phase 0 stores the profile locally; Phase 1 moves it server-side.
+ * Ranks 1-85, then Prestige 1-10 (each prestige resets you to level 1).
+ * XP needed per level grows linearly; the profile is stored locally for now.
  */
-export const MAX_LEVEL = 70;
+export const MAX_LEVEL = 85;
+export const MAX_PRESTIGE = 10;
 
 export const XP = {
   kill: 100,
@@ -11,12 +12,18 @@ export const XP = {
   streak5: 250,
   revenge: 50,
   longshot: 50,
+  grenade: 50,
 } as const;
 
-/** Total XP required to reach `level` (level 1 = 0). */
+/** XP to go from `level` to `level + 1`. */
+export function xpToNext(level: number) {
+  return 800 + 140 * (level - 1);
+}
+
+/** Total XP (within the current prestige) required to reach `level`. */
 export function xpForLevel(level: number) {
   const n = level - 1;
-  return 100 * n * n + 700 * n;
+  return 800 * n + (140 * n * (n - 1)) / 2;
 }
 
 export function levelForXp(xp: number) {
@@ -25,32 +32,68 @@ export function levelForXp(xp: number) {
   return l;
 }
 
-/** Placeholder unlock track — just enough to show the loop working. */
-export const UNLOCKS: Record<number, string> = {
-  2: 'HOLOGRAPHIC SIGHT · DESERT DIGITAL CAMO',
-  3: 'FOREGRIP · PERK: QUICK HANDS',
-  4: 'SUPPRESSOR · WOODLAND CAMO',
-  5: 'PERK: THICK SKIN',
-  6: 'URBAN CAMO',
-  9: 'CRIMSON TIGER CAMO',
-  15: 'GOLD CAMO',
-};
+/** Rank titles, each covering a band of levels. */
+const RANKS: [number, string][] = [
+  [1, 'PRIVATE'], [4, 'PRIVATE FIRST CLASS'], [8, 'SPECIALIST'], [13, 'CORPORAL'], [18, 'SERGEANT'],
+  [24, 'STAFF SERGEANT'], [30, 'SERGEANT FIRST CLASS'], [36, 'MASTER SERGEANT'], [42, 'FIRST SERGEANT'],
+  [48, 'SERGEANT MAJOR'], [54, 'SECOND LIEUTENANT'], [60, 'FIRST LIEUTENANT'], [66, 'CAPTAIN'], [72, 'MAJOR'],
+  [78, 'LIEUTENANT COLONEL'], [83, 'COLONEL'], [85, 'COMMANDER'],
+];
+
+export function rankName(level: number) {
+  let name = RANKS[0][1];
+  for (const [l, n] of RANKS) if (level >= l) name = n;
+  return name;
+}
+
+/** 0-based rank band, used to pick an insignia. */
+export function rankTier(level: number) {
+  let t = 0;
+  RANKS.forEach(([l], i) => {
+    if (level >= l) t = i;
+  });
+  return t;
+}
+
+export interface SoldierLook {
+  uniform: string;
+  gear: string;
+  head: string;
+}
 
 export interface Profile {
   xp: number;
+  prestige: number;
   kills: number;
   deaths: number;
   headshots: number;
   bestStreak: number;
+  /** kills per weapon id, drives attachment unlocks */
+  weaponKills: Record<string, number>;
+  callsign: string;
+  banner: string;
+  look: SoldierLook;
 }
 
 const KEY = 'deadpixel.profile.v1';
 
+export function blankProfile(): Profile {
+  return {
+    xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {},
+    callsign: 'OPERATOR', banner: 'recruit', look: { uniform: 'desert', gear: 'coyote', head: 'nvg' },
+  };
+}
+
 export function loadProfile(): Profile {
-  const blank: Profile = { xp: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0 };
+  const blank = blankProfile();
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...blank, ...(JSON.parse(raw) as Partial<Profile>) } : blank;
+    if (!raw) return blank;
+    const p = { ...blank, ...(JSON.parse(raw) as Partial<Profile>) };
+    p.look = { ...blank.look, ...p.look };
+    p.weaponKills = { ...p.weaponKills };
+    p.xp = Math.min(p.xp, xpForLevel(MAX_LEVEL));
+    return p;
   } catch {
     return blank;
   }
@@ -64,7 +107,18 @@ export function saveProfile(p: Profile) {
   }
 }
 
-export function nextUnlock(level: number): [number, string] | null {
-  for (let l = level + 1; l <= MAX_LEVEL; l++) if (UNLOCKS[l]) return [l, UNLOCKS[l]];
-  return null;
+/** Add XP, holding at level 85 until the player chooses to prestige. */
+export function grantXp(p: Profile, xp: number) {
+  p.xp = Math.min(p.xp + xp, xpForLevel(MAX_LEVEL));
+}
+
+export function canPrestige(p: Profile) {
+  return levelForXp(p.xp) >= MAX_LEVEL && p.prestige < MAX_PRESTIGE;
+}
+
+export function enterPrestige(p: Profile) {
+  if (!canPrestige(p)) return false;
+  p.prestige++;
+  p.xp = 0;
+  return true;
 }

@@ -67,11 +67,12 @@ export class Sfx {
   }
 
   /** distance in metres (0 = player's own gun), pan -1..1 */
-  gunshot(distance = 0, pan = 0, weapon: 'kr4' | 'vk47' = 'kr4', suppressed = false) {
+  gunshot(distance = 0, pan = 0, weapon: string = 'kr4', suppressed = false) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const near = distance < 1;
-    const ak = weapon === 'vk47';
+    const ak = weapon === 'vk47' || weapon === 'r357';
+    const pistol = weapon === 'p9';
     if (suppressed) {
       const out = this.out(near ? 0.45 : Math.min(0.3, 4 / (distance + 4)), pan);
       this.burst(out, t, 0.06, 'bandpass', 900, 1.2, 1);
@@ -82,10 +83,41 @@ export class Sfx {
     const att = near ? 1 : Math.min(1, 9 / (distance + 4));
     const out = this.out(att * (near ? 0.9 : 0.85), pan);
     const lp = near ? (ak ? 6500 : 9000) : Math.max(900, 6000 - distance * 90);
-    this.burst(out, t, near ? (ak ? 0.12 : 0.09) : 0.07, 'lowpass', lp, 0.5, 1.2);
+    this.burst(out, t, near ? (ak ? 0.12 : pistol ? 0.06 : 0.09) : 0.07, pistol ? 'highpass' : 'lowpass', pistol ? 900 : lp, 0.5, 1.2);
     this.burst(out, t, ak ? 0.6 : 0.45, 'bandpass', near ? (ak ? 900 : 1400) : 700, 0.6, 0.25);
     this.tone(out, t, ak ? 0.18 : 0.13, near ? (ak ? 110 : 140) : 100, 38, 'sine', near ? 1.2 : 0.6);
     if (near) this.tone(out, t + 0.03, 0.03, ak ? 2400 : 3200, 1900, 'square', 0.04);
+  }
+
+  explosion(distance: number, pan: number) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const att = Math.min(1, 14 / (distance + 6));
+    const out = this.out(att, pan);
+    this.burst(out, t, 0.9, 'lowpass', Math.max(500, 2400 - distance * 40), 0.4, 1.4);
+    this.burst(out, t, 1.6, 'lowpass', 300, 0.5, 0.6);
+    this.tone(out, t, 0.6, 70, 28, 'sine', 1.4);
+  }
+
+  stunBang(distance: number, pan: number) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(Math.min(1, 12 / (distance + 4)), pan);
+    this.burst(out, t, 0.35, 'highpass', 1800, 0.5, 1.4);
+    this.tone(out, t, 0.2, 180, 60, 'sine', 0.9);
+    if (distance < 9) this.tone(this.out(0.12, 0), t + 0.1, 2.2, 3200, 3150, 'sine', 0.5); // tinnitus
+  }
+
+  smokePop(distance: number, pan: number) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(Math.min(0.6, 8 / (distance + 4)), pan);
+    this.burst(out, t, 0.08, 'bandpass', 900, 1, 1);
+    this.burst(out, t + 0.05, 2.2, 'highpass', 2500, 0.6, 0.35);
+  }
+
+  pin() {
+    this.click(3200, 0.25);
   }
 
   /** Menu boot: rising chord + shimmer. */

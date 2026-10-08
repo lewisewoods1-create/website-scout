@@ -16,8 +16,31 @@ export interface ViewmodelInput {
   crouch: number;
 }
 
-const HIP = new THREE.Vector3(0.15, -0.155, -0.4);
-const SPRINT = new THREE.Vector3(0.08, -0.19, -0.34);
+const POSES = {
+  rifle: { hip: new THREE.Vector3(0.15, -0.155, -0.4), sprint: new THREE.Vector3(0.08, -0.19, -0.34) },
+  pistol: { hip: new THREE.Vector3(0.1, -0.09, -0.34), sprint: new THREE.Vector3(0.1, -0.2, -0.3) },
+};
+
+type Kind = 'rifle' | 'pistol' | 'revolver';
+
+interface Built {
+  rifle: THREE.Group;
+  kind: Kind;
+  elbowL: THREE.Vector3;
+  handL: THREE.Object3D;
+  handLHome: THREE.Vector3;
+  sleeveL: THREE.Mesh;
+  mag: THREE.Object3D;
+  magHome: THREE.Vector3;
+  charging: THREE.Object3D | null;
+  chargingHome: THREE.Vector3;
+  muzzle: THREE.Object3D;
+  port: THREE.Object3D;
+  sight: THREE.Vector3;
+  cylinder: THREE.Object3D | null;
+  crane: THREE.Object3D | null;
+  hammer: THREE.Object3D | null;
+}
 
 /** First-person gun + gloved hands, rendered at full res in its own scene. */
 export class Viewmodel {
@@ -25,19 +48,18 @@ export class Viewmodel {
   readonly camera = new THREE.PerspectiveCamera(52, 1, 0.01, 10);
   private root = new THREE.Group();
   private mats: Materials;
-  private rifle!: THREE.Group;
-  private mag!: THREE.Object3D;
-  private magHome!: THREE.Vector3;
-  private charging!: THREE.Object3D;
-  private chargingHome!: THREE.Vector3;
-  private muzzle!: THREE.Object3D;
-  private port!: THREE.Object3D;
-  private adsPos!: THREE.Vector3;
-  private handL!: THREE.Object3D;
-  private handLHome!: THREE.Vector3;
-  private sleeveL!: THREE.Mesh;
+  private w!: Built;
+  private cache = new Map<string, Built>();
+  private adsPos = new THREE.Vector3();
   private recoilMul = 1;
-  private elbowL = new THREE.Vector3(-0.26, -0.32, 0.12);
+  private switchT = -1;
+  private pending: (() => void) | null = null;
+  private throwT = -1;
+  private slideKick = 0;
+  private cylAngle = 0;
+  private cylTarget = 0;
+  /** pistol slide locks back on an empty mag */
+  slideLocked = false;
   private flash = new THREE.Group();
   private flashLight = new THREE.PointLight(0xffa040, 0, 2.5, 2);
   private flashTime = 0;
@@ -94,7 +116,7 @@ export class Viewmodel {
     this.flash.visible = false;
     this.flashLight.position.z = -0.05;
     this.mats = m;
-    this.equip({ weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'none', camo: 'none' }, 0.24, 1);
+    this.equip({ weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'none', mag: 'std', camo: 'none' }, 0.24, 1);
 
     const shellGeo = new THREE.CylinderGeometry(0.0048, 0.0048, 0.045, 10);
     for (let i = 0; i < 14; i++) {
@@ -105,41 +127,83 @@ export class Viewmodel {
     }
   }
 
-  /** Swap in a new weapon build (create-a-class). */
-  equip(cfg: WeaponCfg, eyeDist: number, recoil: number) {
+  private build(cfg: WeaponCfg): Built {
+    const key = JSON.stringify(cfg);
+    const hit = this.cache.get(key);
+    if (hit) return hit;
     const m = this.mats;
-    if (this.rifle) this.root.remove(this.rifle);
-    this.recoilMul = recoil;
-    this.rifle = buildWeapon(m, cfg, true);
-    this.root.add(this.rifle);
-    const hands = attachHands(this.rifle, m);
-    this.handL = hands.left;
-    this.handLHome = hands.left.position.clone();
-
+    const rifle = buildWeapon(m, cfg, true);
+    const kind = rifle.userData.kind as Kind;
+    const hands = attachHands(rifle, m);
     // sleeves running back out of frame
-    const sleeveGeo = new THREE.CylinderGeometry(0.04, 0.046, 1, 20, 1, true);
-    this.rifle.updateMatrixWorld(true);
-    const inv = new THREE.Matrix4().copy(this.rifle.matrixWorld).invert();
+    const sleeveGeo = new THREE.CylinderGeometry(0.04, 0.046, 1, 24, 1, true);
+    rifle.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(rifle.matrixWorld).invert();
     const wristR = hands.right.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-    const elbowR = new THREE.Vector3(0.1, -0.3, 0.42);
+    const pistolish = kind !== 'rifle';
+    const elbowR = pistolish ? new THREE.Vector3(0.2, -0.44, 0.26) : new THREE.Vector3(0.1, -0.3, 0.42);
     const sleeveStart = wristR.clone().add(new THREE.Vector3(0, 0, 0.035));
-    orientLimb(mesh(sleeveGeo, m.camoClose, this.rifle), sleeveStart, elbowR);
-    const cuffR = mesh(new THREE.TorusGeometry(0.046, 0.012, 10, 24), m.camoClose, this.rifle, { pos: sleeveStart.toArray() as [number, number, number] });
+    orientLimb(mesh(sleeveGeo, m.camoClose, rifle), sleeveStart, elbowR);
+    const cuffR = mesh(new THREE.TorusGeometry(0.046, 0.012, 12, 28), m.camoClose, rifle, { pos: sleeveStart.toArray() as [number, number, number] });
     cuffR.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), elbowR.clone().sub(sleeveStart).normalize());
-    this.sleeveL = mesh(sleeveGeo, m.camoClose, this.rifle);
+    const sleeveL = mesh(sleeveGeo, m.camoClose, rifle);
+    const handL = hands.left;
+    const mag = rifle.getObjectByName('mag')!;
+    const charging = rifle.getObjectByName('chargingHandle') ?? null;
+    const sightNode = rifle.getObjectByName('sight')!;
+    const b: Built = {
+      rifle,
+      kind,
+      elbowL: pistolish ? new THREE.Vector3(-0.22, -0.44, 0.26) : new THREE.Vector3(-0.26, -0.32, 0.12),
+      handL,
+      handLHome: handL.position.clone(),
+      sleeveL,
+      mag,
+      magHome: mag.position.clone(),
+      charging,
+      chargingHome: charging ? charging.position.clone() : new THREE.Vector3(),
+      muzzle: rifle.getObjectByName('muzzle')!,
+      port: rifle.getObjectByName('ejectionPort')!,
+      sight: sightNode.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv),
+      cylinder: rifle.getObjectByName('cylinder') ?? null,
+      crane: rifle.getObjectByName('cylinderSwing') ?? null,
+      hammer: rifle.getObjectByName('hammer') ?? null,
+    };
+    this.cache.set(key, b);
+    return b;
+  }
 
-    this.mag = this.rifle.getObjectByName('mag')!;
-    this.magHome = this.mag.position.clone();
-    this.charging = this.rifle.getObjectByName('chargingHandle')!;
-    this.chargingHome = this.charging.position.clone();
-    this.muzzle = this.rifle.getObjectByName('muzzle')!;
-    this.port = this.rifle.getObjectByName('ejectionPort')!;
-    const sight = this.rifle.getObjectByName('sight')!;
-    const sp = sight.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-    this.adsPos = new THREE.Vector3(-sp.x, -sp.y, -eyeDist - sp.z);
-    this.muzzle.add(this.flash);
-    this.muzzle.add(this.flashLight);
+  /** Swap the held weapon immediately. */
+  equip(cfg: WeaponCfg, eyeDist: number, recoil: number) {
+    if (this.w) this.root.remove(this.w.rifle);
+    this.w = this.build(cfg);
+    this.root.add(this.w.rifle);
+    this.recoilMul = recoil;
+    const sp = this.w.sight;
+    this.adsPos.set(-sp.x, -sp.y, -eyeDist - sp.z);
+    this.w.muzzle.add(this.flash);
+    this.w.muzzle.add(this.flashLight);
     this.reload = -1;
+    this.slideLocked = false;
+  }
+
+  /** Lower the current weapon, swap, raise the new one. */
+  switchTo(cfg: WeaponCfg, eyeDist: number, recoil: number) {
+    this.pending = () => this.equip(cfg, eyeDist, recoil);
+    this.switchT = 0;
+  }
+
+  throwAnim() {
+    this.throwT = 0;
+  }
+
+  /** True while switching or throwing: can't fire or aim. */
+  get busy() {
+    return this.switchT >= 0 || this.throwT >= 0;
+  }
+
+  get kind() {
+    return this.w.kind;
   }
 
   setAspect(a: number) {
@@ -157,9 +221,14 @@ export class Viewmodel {
     this.flash.rotation.z = Math.random() * Math.PI;
     this.flash.scale.setScalar(0.75 + Math.random() * 0.5);
 
+    if (this.w.kind === 'pistol') this.slideKick = 1;
+    if (this.w.kind === 'revolver') {
+      this.cylTarget += Math.PI / 3;
+      return; // revolvers keep their brass
+    }
     // eject brass from the port in camera space
     const s = this.shells[this.shellIdx++ % this.shells.length];
-    this.port.getWorldPosition(s.m.position);
+    this.w.port.getWorldPosition(s.m.position);
     this.camera.worldToLocal(s.m.position);
     s.v.set(0.9 + Math.random() * 0.5, 0.8 + Math.random() * 0.5, 0.25 + Math.random() * 0.2);
     s.spin.set(Math.random() * 20, Math.random() * 20, 15 + Math.random() * 10);
@@ -174,7 +243,7 @@ export class Viewmodel {
   }
 
   update(dt: number, inp: ViewmodelInput) {
-    this.ads = damp(this.ads, inp.ads && this.reload < 0 && !inp.sprinting ? 1 : 0, 14, dt);
+    this.ads = damp(this.ads, inp.ads && this.reload < 0 && !inp.sprinting && !this.busy ? 1 : 0, 14, dt);
     this.sprint = damp(this.sprint, inp.sprinting && this.reload < 0 ? 1 : 0, 9, dt);
     const moveK = clamp(inp.speed / 5, 0, 1.5) * (inp.grounded ? 1 : 0.2);
     this.bobAmt = damp(this.bobAmt, moveK, 8, dt);
@@ -193,9 +262,30 @@ export class Viewmodel {
     this.kickRoll = damp(this.kickRoll, 0, 9, dt);
     this.land = damp(this.land, 0, 7, dt);
 
+    // switch / throw timers
+    let lower = 0;
+    if (this.switchT >= 0) {
+      this.switchT += dt / 0.5;
+      if (this.switchT >= 0.5 && this.pending) {
+        this.pending();
+        this.pending = null;
+      }
+      lower = Math.max(lower, 1 - Math.abs(this.switchT - 0.5) * 2);
+      if (this.switchT >= 1) this.switchT = -1;
+    }
+    if (this.throwT >= 0) {
+      this.throwT += dt / 0.55;
+      lower = Math.max(lower, Math.sin(Math.min(1, this.throwT) * Math.PI));
+      if (this.throwT >= 1) this.throwT = -1;
+    }
+    this.slideKick = damp(this.slideKick, 0, 28, dt);
+    this.cylAngle = damp(this.cylAngle, this.cylTarget, 18, dt);
+
+    const pose = this.w.kind === 'rifle' ? POSES.rifle : POSES.pistol;
     const p = this.root.position;
-    p.copy(HIP).lerp(this.adsPos, this.ads);
-    p.lerp(SPRINT, this.sprint * (1 - this.ads));
+    p.copy(pose.hip).lerp(this.adsPos, this.ads);
+    p.lerp(pose.sprint, this.sprint * (1 - this.ads));
+    p.y -= lower * 0.28;
     p.y -= inp.crouch * 0.01 * (1 - this.ads);
 
     const bobK = this.bobAmt * lerp(1, 0.12, this.ads) * (1 + this.sprint * 0.8);
@@ -207,7 +297,7 @@ export class Viewmodel {
     p.z += this.kick;
 
     const r = this.root.rotation;
-    r.x = this.kickPitch + this.sway.y + Math.sin(this.bob * 2) * 0.008 * bobK - this.land * 0.05;
+    r.x = -lower * 0.6 + this.kickPitch + this.sway.y + Math.sin(this.bob * 2) * 0.008 * bobK - this.land * 0.05;
     r.y = this.kickYaw + this.sway.x + this.sprint * 0.75 * (1 - this.ads);
     r.z = this.kickRoll + Math.sin(this.bob) * 0.02 * bobK + this.sprint * 0.35 * (1 - this.ads);
 
@@ -231,45 +321,59 @@ export class Viewmodel {
   }
 
   private animateReload() {
+    const w = this.w;
     const t = this.reload;
-    this.mag.position.copy(this.magHome);
-    this.mag.visible = true;
-    this.charging.position.copy(this.chargingHome);
-    this.handL.position.copy(this.handLHome);
-    this.rifle.rotation.set(0, 0, 0);
-    this.rifle.position.set(0, 0, 0);
+    w.mag.position.copy(w.magHome);
+    w.mag.visible = true;
+    if (w.charging) w.charging.position.copy(w.chargingHome);
+    w.handL.position.copy(w.handLHome);
+    w.rifle.rotation.set(0, 0, 0);
+    w.rifle.position.set(0, 0, 0);
+    if (w.crane) w.crane.rotation.z = 0;
+    if (w.cylinder) w.cylinder.rotation.z = this.cylAngle;
+    if (w.hammer) w.hammer.rotation.x = -Math.min(0.6, Math.abs(this.cylTarget - this.cylAngle) * 2);
+    if (w.kind === 'pistol' && w.charging) w.charging.position.z += this.slideKick * 0.024 + (this.slideLocked ? 0.024 : 0);
+
     if (t >= 0) {
       const env = smooth(clamp(t / 0.14, 0, 1)) * smooth(clamp((1 - t) / 0.16, 0, 1));
-      this.rifle.rotation.z = 0.5 * env;
-      this.rifle.rotation.x = 0.18 * env;
-      this.rifle.rotation.y = -0.12 * env;
-      this.rifle.position.y = -0.02 * env;
+      const tilt = w.kind === 'rifle' ? 1 : 0.7;
+      w.rifle.rotation.z = 0.5 * env * tilt;
+      w.rifle.rotation.x = 0.18 * env;
+      w.rifle.rotation.y = -0.12 * env;
+      w.rifle.position.y = -0.02 * env;
 
-      // mag out (0.16..0.32), new mag in (0.48..0.66)
-      let drop = 0;
-      if (t < 0.16) drop = 0;
-      else if (t < 0.32) drop = smooth((t - 0.16) / 0.16);
-      else if (t < 0.48) drop = 1;
-      else if (t < 0.66) drop = 1 - smooth((t - 0.48) / 0.18);
-      this.mag.position.y -= drop * 0.28;
-      this.mag.position.z += drop * 0.05;
-      this.mag.visible = !(t > 0.33 && t < 0.4);
-
-      // support hand travels to the mag well and back
-      const handK = smooth(clamp((t - 0.08) / 0.16, 0, 1)) * smooth(clamp((0.8 - t) / 0.12, 0, 1));
-      const magTarget = new THREE.Vector3(-0.05, -0.12, -0.02).add(this.mag.position).sub(this.magHome);
-      this.handL.position.lerp(magTarget, handK);
-
-      if (this.reloadEmpty && t > 0.76 && t < 0.92) {
-        const k = (t - 0.76) / 0.16;
-        this.charging.position.z = this.chargingHome.z + (k < 0.5 ? smooth(k * 2) : 1 - smooth((k - 0.5) * 2)) * 0.07;
+      if (w.kind === 'revolver' && w.crane) {
+        // swing the cylinder out, dump brass, load, close
+        const open = smooth(clamp((t - 0.1) / 0.12, 0, 1)) * smooth(clamp((0.88 - t) / 0.1, 0, 1));
+        w.crane.rotation.z = 1.15 * open;
+        w.rifle.rotation.x += 0.35 * open;
+        const handK = smooth(clamp((t - 0.3) / 0.12, 0, 1)) * smooth(clamp((0.8 - t) / 0.1, 0, 1));
+        w.handL.position.lerp(new THREE.Vector3(-0.07, 0.0, -0.03), handK);
+      } else {
+        // mag out (0.16..0.32), new mag in (0.48..0.66)
+        let drop = 0;
+        if (t < 0.16) drop = 0;
+        else if (t < 0.32) drop = smooth((t - 0.16) / 0.16);
+        else if (t < 0.48) drop = 1;
+        else if (t < 0.66) drop = 1 - smooth((t - 0.48) / 0.18);
+        w.mag.position.y -= drop * (w.kind === 'pistol' ? 0.2 : 0.28);
+        w.mag.position.z += drop * 0.05;
+        w.mag.visible = !(t > 0.33 && t < 0.4);
+        const handK = smooth(clamp((t - 0.08) / 0.16, 0, 1)) * smooth(clamp((0.8 - t) / 0.12, 0, 1));
+        const magTarget = new THREE.Vector3(-0.05, -0.12, -0.02).add(w.mag.position).sub(w.magHome);
+        if (w.kind === 'rifle') w.handL.position.lerp(magTarget, handK);
+        if (this.reloadEmpty && w.charging && t > 0.76 && t < 0.92) {
+          const k = (t - 0.76) / 0.16;
+          w.charging.position.z = w.chargingHome.z + (k < 0.5 ? smooth(k * 2) : 1 - smooth((k - 0.5) * 2)) * (w.kind === 'pistol' ? 0.03 : 0.07);
+        }
       }
     }
-    orientLimb(this.sleeveL, this.handL.position.clone().add(new THREE.Vector3(-0.03, 0, 0)), this.elbowL);
+    const wrist = w.rifle.worldToLocal(w.handL.getWorldPosition(new THREE.Vector3()));
+    orientLimb(w.sleeveL, wrist.add(new THREE.Vector3(-0.03, 0, 0)), w.elbowL);
   }
 
   muzzleWorld(out: THREE.Vector3) {
-    return this.muzzle.getWorldPosition(out);
+    return this.w.muzzle.getWorldPosition(out);
   }
 }
 
@@ -282,6 +386,7 @@ export class Gun {
   reloading = -1;
   private reloadDur = 0;
   emptyReload = false;
+  private lastTrigger = false;
 
   constructor(stats: GunStats) {
     this.stats = stats;
@@ -332,7 +437,15 @@ export class Gun {
       return 0;
     }
     let shots = 0;
-    if (trigger && canFire) {
+    const pull = trigger && !this.lastTrigger;
+    this.lastTrigger = trigger;
+    if (!this.stats.auto) {
+      if (pull && canFire && this.cool <= 0 && this.ammo > 0) {
+        this.cool = 60 / this.stats.rpm;
+        this.ammo--;
+        shots = 1;
+      }
+    } else if (trigger && canFire) {
       while (this.cool <= 0 && this.ammo > 0) {
         this.cool += 60 / this.stats.rpm;
         this.ammo--;

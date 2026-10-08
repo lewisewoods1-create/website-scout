@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { Materials } from './materials';
-import type { Loadout, MuzzleId, OpticId, UnderId, WeaponId } from './loadout';
+import type { Loadout, MagId, MuzzleId, OpticId, UnderId, WeaponId } from './loadout';
 import { group, mesh, rbox } from './util';
-import { dotReticleTex, reticleTex, weaponCamoTex, type CamoId } from './textures';
+import { acogReticleTex, dotReticleTex, markingTex, reticleTex, weaponCamoTex, type CamoId } from './textures';
 
 /**
  * Procedural weapons, each 150-250 parts.
@@ -16,14 +16,26 @@ export interface WeaponCfg {
   optic: OpticId;
   muzzle: MuzzleId;
   under: UnderId;
+  mag: MagId;
   camo: CamoId;
 }
 
-export function cfgFromLoadout(l: Loadout): WeaponCfg {
-  return { weapon: l.weapon, optic: l.optic, muzzle: l.muzzle, under: l.under, camo: l.camo };
+export function cfgFromLoadout(l: Loadout, slot: 'primary' | 'secondary' = 'primary'): WeaponCfg {
+  if (slot === 'secondary') {
+    const pistol = l.secondary === 'p9';
+    return {
+      weapon: l.secondary,
+      optic: 'iron',
+      muzzle: pistol && l.secAttach === 'suppressor' ? 'suppressor' : 'none',
+      under: 'none',
+      mag: pistol && l.secAttach === 'extmag' ? 'ext' : 'std',
+      camo: l.camo,
+    };
+  }
+  return { weapon: l.weapon, optic: l.optic, muzzle: l.muzzle, under: l.under, mag: l.mag, camo: l.camo };
 }
 
-const cyl = (rt: number, rb: number, h: number, seg = 20) => new THREE.CylinderGeometry(rt, rb, h, seg);
+const cyl = (rt: number, rb: number, h: number, seg = 32) => new THREE.CylinderGeometry(rt, rb, h, seg);
 const X90: [number, number, number] = [Math.PI / 2, 0, 0];
 const Z90: [number, number, number] = [0, 0, Math.PI / 2];
 
@@ -45,12 +57,15 @@ function camoMaterial(id: CamoId, base: THREE.MeshStandardMaterial): THREE.MeshS
 
 let holoRet: THREE.Texture | null = null;
 let dotRet: THREE.Texture | null = null;
+let acogRet: THREE.Texture | null = null;
 
 export function buildWeapon(mats: Materials, cfg: WeaponCfg, firstPerson = true): THREE.Group {
   const paint = camoMaterial(cfg.camo, mats.anodized);
   const m: Materials = cfg.camo === 'none' ? mats : { ...mats, anodized: paint, fde: paint, wood: paint };
-  const root = cfg.weapon === 'vk47' ? buildVK47(m, cfg) : buildKR4(m, cfg);
+  const build = { kr4: buildKR4, vk47: buildVK47, p9: buildP9, r357: buildR357 }[cfg.weapon];
+  const root = build(m, cfg);
   root.userData.cfg = cfg;
+  root.userData.kind = cfg.weapon === 'p9' ? 'pistol' : cfg.weapon === 'r357' ? 'revolver' : 'rifle';
   if (!firstPerson) {
     const ret = root.getObjectByName('reticle');
     ret?.parent?.remove(ret);
@@ -77,6 +92,35 @@ function addOptic(root: THREE.Object3D, m: Materials, kind: OpticId, y: number, 
     mesh(cyl(0.008, 0.008, 0.012, 20), m.anodizedEdge, sight, { pos: [0.02, 0.015, 0.04], rot: Z90 });
     for (let i = 0; i < 3; i++) mesh(rbox(0.006, 0.004, 0.006, 0.0015), m.rubber, sight, { pos: [0, 0.015, 0.045 - i * 0.008] });
     group(sight, { pos: [0, 0.035, -0.036], name: 'sight' });
+  } else if (kind === 'acog') {
+    const sight = group(root, { pos: [0, y, z] });
+    mesh(rbox(0.028, 0.012, 0.07, 0.002), m.anodized, sight, { pos: [0, 0.006, 0] }); // mount
+    for (const zz of [-0.025, 0.025]) mesh(rbox(0.034, 0.008, 0.012, 0.002), m.anodizedEdge, sight, { pos: [0, 0.004, zz] }); // clamps
+    const cy = 0.036;
+    // body: open double-sided shells so, when aiming, the eye looks down a dark tube
+    const shell = (m.anodized as THREE.MeshStandardMaterial).clone();
+    shell.side = THREE.DoubleSide;
+    const tube = (r0: number, r1: number, len: number, zz: number, mat: THREE.Material) => {
+      const g = new THREE.CylinderGeometry(r1, r0, len, 36, 1, true);
+      g.rotateX(Math.PI / 2);
+      mesh(g, mat, sight, { pos: [0, cy, zz] });
+    };
+    tube(0.0175, 0.0175, 0.075, 0.0, shell);
+    tube(0.0175, 0.023, 0.025, -0.05, shell); // objective bell
+    tube(0.023, 0.023, 0.016, -0.07, shell);
+    tube(0.0175, 0.0165, 0.02, 0.047, shell); // eyepiece
+    tube(0.0175, 0.0175, 0.012, 0.062, m.rubber);
+    mesh(new THREE.TorusGeometry(0.0175, 0.0028, 10, 36), m.rubber, sight, { pos: [0, cy, 0.068] });
+    mesh(new THREE.TorusGeometry(0.023, 0.002, 8, 36), m.anodizedEdge, sight, { pos: [0, cy, -0.078] });
+    // turrets + fibre-optic tube on top
+    mesh(cyl(0.008, 0.008, 0.012), m.anodizedEdge, sight, { pos: [0, cy + 0.022, 0.005] });
+    mesh(cyl(0.008, 0.008, 0.012), m.anodizedEdge, sight, { pos: [0.022, cy, 0.005], rot: Z90 });
+    mesh(cyl(0.0035, 0.0035, 0.05, 12), m.nvgGlass, sight, { pos: [0, cy + 0.02, -0.03], rot: X90 });
+    mesh(new THREE.CircleGeometry(0.022, 36), m.glass, sight, { pos: [0, cy, -0.077], rot: [0, Math.PI, 0] });
+    mesh(new THREE.CircleGeometry(0.0165, 36), m.glass, sight, { pos: [0, cy, 0.06] });
+    acogRet ??= acogReticleTex();
+    reticle(sight, acogRet, 0.03, [0, cy, 0.055]);
+    group(sight, { pos: [0, cy, 0.055], name: 'sight' });
   } else if (kind === 'reflex') {
     const sight = group(root, { pos: [0, y, z] });
     mesh(rbox(0.026, 0.01, 0.05, 0.002), m.anodized, sight, { pos: [0, 0.005, 0] });
@@ -116,6 +160,17 @@ function addMuzzle(muzzle: THREE.Object3D, m: Materials, kind: MuzzleId, style: 
     for (let i = 0; i < 5; i++) mesh(new THREE.TorusGeometry(0.0202, 0.0012, 6, 32), m.anodizedEdge, muzzle, { pos: [0, 0, -0.02 - i * 0.025] });
     mesh(cyl(0.005, 0.005, 0.002, 12), m.hole, muzzle, { pos: [0, 0, -0.1555], rot: X90 });
     muzzle.userData.tip = -0.16;
+    return;
+  }
+  if (kind === 'comp') {
+    mesh(cyl(0.0145, 0.0145, 0.07, 32), m.parkerized, muzzle, { pos: [0, 0, -0.005], rot: X90 });
+    mesh(cyl(0.0155, 0.0155, 0.01, 32), m.steel, muzzle, { pos: [0, 0, 0.03], rot: X90 });
+    for (let i = 0; i < 3; i++) {
+      mesh(rbox(0.008, 0.004, 0.009, 0.002), m.hole, muzzle, { pos: [0, 0.0135, -0.025 + i * 0.016] });
+      for (const s of [-1, 1]) mesh(rbox(0.004, 0.006, 0.009, 0.002), m.hole, muzzle, { pos: [s * 0.0135, 0.004, -0.025 + i * 0.016] });
+    }
+    mesh(cyl(0.006, 0.006, 0.003, 16), m.hole, muzzle, { pos: [0, 0, -0.0405], rot: X90 });
+    muzzle.userData.tip = -0.04;
     return;
   }
   if (style === 'birdcage') {
@@ -236,14 +291,7 @@ function buildKR4(m: Materials, cfg: WeaponCfg): THREE.Group {
   const muzzle = group(root, { pos: [0, 0.018, -0.6], name: 'muzzleBase' });
   addMuzzle(muzzle, m, cfg.muzzle, 'birdcage');
 
-  // foregrip
-  if (cfg.under === 'grip') {
-    const fg = group(root, { pos: [0, -0.008, -0.3] });
-    mesh(rbox(0.024, 0.008, 0.06, 0.003), m.polymer, fg, {});
-    mesh(cyl(0.014, 0.016, 0.08, 20), m.fde, fg, { pos: [0, -0.042, 0] });
-    for (let i = 0; i < 4; i++) mesh(new THREE.TorusGeometry(0.0155, 0.0015, 6, 20), m.polymer, fg, { pos: [0, -0.03 - i * 0.014, 0], rot: X90 });
-    mesh(cyl(0.017, 0.017, 0.008, 20), m.polymer, fg, { pos: [0, -0.084, 0] });
-  }
+  addUnder(root, m, cfg.under, -0.008, -0.3, 0.026);
 
   // weapon light
   const light = group(root, { pos: [0.037, 0.018, -0.36] });
@@ -254,7 +302,7 @@ function buildKR4(m: Materials, cfg: WeaponCfg): THREE.Group {
   for (let i = 0; i < 8; i++) mesh(new THREE.TorusGeometry(0.0118, 0.0012, 4, 20), m.anodizedEdge, light, { pos: [0.004, 0, 0.03 - i * 0.006] });
 
   // magazine (curved polymer)
-  buildMag(root, m, m.fde, [0, -0.06, -0.036], 0.19, 0.04, 0.03);
+  buildMag(root, m, m.fde, [0, -0.06, -0.036], 0.19, 0.04, 0.03, cfg.mag);
 
   // sights
   if (cfg.optic === 'iron') {
@@ -274,6 +322,7 @@ function buildKR4(m: Materials, cfg: WeaponCfg): THREE.Group {
     mesh(rbox(0.02, 0.008, 0.026, 0.002), m.anodized, root, { pos: [0, 0.058, -0.41] });
   }
 
+  markings(root, 'KR-4  CAL 5.56mm  SAFE-SEMI-AUTO', [-0.0162, -0.017, -0.035], 0.07);
   finishMuzzle(root);
   anchors(root, [0, -0.04, 0.077], -0.32, [-0.065, -0.026, -0.2]);
   return root;
@@ -366,15 +415,10 @@ function buildVK47(m: Materials, cfg: WeaponCfg): THREE.Group {
   const muzzle = group(root, { pos: [0, 0.008, -0.56], name: 'muzzleBase' });
   addMuzzle(muzzle, m, cfg.muzzle, 'slant');
 
-  if (cfg.under === 'grip') {
-    const fg = group(root, { pos: [0, -0.028, -0.29] });
-    mesh(rbox(0.026, 0.01, 0.06, 0.003), steel, fg, {});
-    mesh(cyl(0.014, 0.016, 0.08, 20), m.polymer, fg, { pos: [0, -0.044, 0] });
-    for (let i = 0; i < 4; i++) mesh(new THREE.TorusGeometry(0.0155, 0.0015, 6, 20), m.rubber, fg, { pos: [0, -0.032 - i * 0.014, 0], rot: X90 });
-  }
+  addUnder(root, m, cfg.under, -0.028, -0.29, 0.027);
 
   // banana mag in bakelite
-  buildMag(root, m, m.bakelite, [0, -0.025, -0.07], 0.2, 0.075, 0.034);
+  buildMag(root, m, m.bakelite, [0, -0.025, -0.07], 0.2, 0.075, 0.034, cfg.mag);
 
   if (cfg.optic === 'iron') {
     group(root, { pos: [0, 0.0545, -0.124], name: 'sight' });
@@ -384,14 +428,27 @@ function buildVK47(m: Materials, cfg: WeaponCfg): THREE.Group {
     addOptic(root, m, cfg.optic, 0.051, 0.005);
   }
 
+  markings(root, 'VK-47  7.62x39  No 0451', [-0.0173, -0.012, 0.02], 0.075);
   finishMuzzle(root);
   anchors(root, [0, -0.025, 0.08], -0.38, [-0.068, -0.03, -0.25]);
   return root;
 }
 
 /** Curved, ribbed magazine with two visible rounds. */
-function buildMag(root: THREE.Object3D, m: Materials, mat: THREE.Material, pos: [number, number, number], H: number, bend: number, width: number) {
+function buildMag(root: THREE.Object3D, m: Materials, mat: THREE.Material, pos: [number, number, number], H0: number, bend0: number, width: number, kind: MagId = 'std') {
   const mag = group(root, { pos, name: 'mag' });
+  const H = kind === 'ext' ? H0 * 1.4 : H0;
+  const bend = kind === 'ext' ? bend0 * 1.6 : bend0;
+  if (kind === 'fast') {
+    // second mag taped alongside, offset down and to the right
+    const twin = group(mag, { pos: [0.027, -0.04, 0.0] });
+    singleMag(twin, m, mat, H, bend, width, false);
+    for (const y of [-0.03, -0.09]) mesh(rbox(0.06, 0.012, width * 2.2, 0.003), m.webbing, mag, { pos: [0.013, y, 0.004] });
+  }
+  singleMag(mag, m, mat, H, bend, width, true);
+}
+
+function singleMag(mag: THREE.Object3D, m: Materials, mat: THREE.Material, H: number, bend: number, width: number, rounds: boolean) {
   const curve = (y: number) => -bend * (y / H) * (y / H) - 0.015 * (y / H);
   const ms = new THREE.Shape();
   ms.moveTo(-width, 0);
@@ -402,12 +459,12 @@ function buildMag(root: THREE.Object3D, m: Materials, mat: THREE.Material, pos: 
   const g = new THREE.ExtrudeGeometry(ms, { depth: 0.022, bevelEnabled: true, bevelSize: 0.0025, bevelThickness: 0.0025, bevelSegments: 2 });
   g.translate(0, 0, -0.011);
   mesh(g, mat, mag, { rot: [0, -Math.PI / 2, 0] });
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < Math.floor(H / 0.045); i++) {
     const y = 0.03 + i * 0.035;
     for (const s of [-1, 1]) mesh(rbox(0.003, 0.004, width * 1.6, 0.0015), mat, mag, { pos: [s * 0.0135, -y, curve(y)] });
   }
   mesh(rbox(0.032, 0.012, width * 2.4, 0.004), m.polymer, mag, { pos: [0, -H - 0.004, curve(H)], rot: [-0.25 - bend * 3, 0, 0] });
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < (rounds ? 2 : 0); i++) {
     const rnd = group(mag, { pos: [(i ? -1 : 1) * 0.004, 0.003 + i * 0.003, -0.005 * i] });
     mesh(cyl(0.0048, 0.0048, 0.034, 12), m.brass, rnd, { rot: X90 });
     mesh(new THREE.ConeGeometry(0.0034, 0.02, 12), m.copper, rnd, { pos: [0, 0, -0.026], rot: [-Math.PI / 2, 0, 0] });
@@ -418,4 +475,145 @@ function buildMag(root: THREE.Object3D, m: Materials, mat: THREE.Material, pos: 
 function finishMuzzle(root: THREE.Object3D) {
   const base = root.getObjectByName('muzzleBase')!;
   group(base, { pos: [0, 0, (base.userData.tip as number) ?? 0], name: 'muzzle' });
+}
+
+/** Engraved roll-mark on the left side of the receiver. */
+function markings(root: THREE.Object3D, text: string, pos: [number, number, number], width: number) {
+  const tex = markingTex(text);
+  const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, metalness: 0.6, roughness: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  mesh(new THREE.PlaneGeometry(width, width / 8), mat, root, { pos, rot: [0, -Math.PI / 2, 0] });
+}
+
+/** Vertical grip, angled grip or laser module under/along the handguard. */
+function addUnder(root: THREE.Object3D, m: Materials, kind: UnderId, y: number, z: number, side: number) {
+  if (kind === 'grip') {
+    const fg = group(root, { pos: [0, y, z] });
+    mesh(rbox(0.024, 0.008, 0.06, 0.003), m.polymer, fg, {});
+    mesh(cyl(0.014, 0.016, 0.08), m.fde, fg, { pos: [0, -0.042, 0] });
+    for (let i = 0; i < 4; i++) mesh(new THREE.TorusGeometry(0.0155, 0.0015, 8, 32), m.polymer, fg, { pos: [0, -0.03 - i * 0.014, 0], rot: X90 });
+    mesh(cyl(0.017, 0.017, 0.008), m.polymer, fg, { pos: [0, -0.084, 0] });
+  } else if (kind === 'angled') {
+    const fg = group(root, { pos: [0, y, z + 0.03] });
+    const sh = new THREE.Shape();
+    sh.moveTo(0, 0);
+    sh.lineTo(0.075, 0);
+    sh.quadraticCurveTo(0.08, -0.012, 0.07, -0.03);
+    sh.lineTo(0.02, -0.04);
+    sh.quadraticCurveTo(0.004, -0.03, 0, 0);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.024, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 3, curveSegments: 10 });
+    g.translate(-0.04, 0, -0.012);
+    mesh(g, m.fde, fg, { rot: [0, Math.PI / 2, 0] });
+    for (let i = 0; i < 4; i++) mesh(rbox(0.026, 0.003, 0.004, 0.001), m.polymer, fg, { pos: [0, -0.012 - i * 0.006, 0.012 - i * 0.008] });
+  } else if (kind === 'laser') {
+    const lz = group(root, { pos: [-side - 0.012, y + 0.026, z - 0.03] });
+    mesh(rbox(0.016, 0.026, 0.06, 0.004), m.anodized, lz, {});
+    mesh(rbox(0.006, 0.016, 0.03, 0.002), m.anodizedEdge, lz, { pos: [0.009, 0, 0.005] }); // mount
+    for (const yy of [0.006, -0.006]) mesh(cyl(0.0042, 0.0042, 0.004, 16), yy > 0 ? m.laserRed : m.lens, lz, { pos: [0, yy, -0.031], rot: X90 });
+    mesh(rbox(0.008, 0.006, 0.012, 0.002), m.rubber, lz, { pos: [-0.004, 0.0145, 0.016] }); // switch
+  }
+}
+
+// ---------------------------------------------------------------- P-9 pistol
+
+function buildP9(m: Materials, cfg: WeaponCfg): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'weapon';
+  const slideMat = m.anodized;
+  // slide (named chargingHandle so the viewmodel can rack/recoil it)
+  const slide = group(root, { name: 'chargingHandle' });
+  mesh(rbox(0.025, 0.028, 0.188, 0.004, 3), slideMat, slide, { pos: [0, 0.031, -0.03] });
+  mesh(rbox(0.021, 0.006, 0.17, 0.003), slideMat, slide, { pos: [0, 0.046, -0.03] }); // top bevel
+  for (let i = 0; i < 7; i++) for (const s of [-1, 1]) mesh(rbox(0.0015, 0.018, 0.0022, 0.0006), m.hole, slide, { pos: [s * 0.0126, 0.032, 0.035 + i * 0.0055] });
+  for (let i = 0; i < 4; i++) for (const s of [-1, 1]) mesh(rbox(0.0015, 0.014, 0.0022, 0.0006), m.hole, slide, { pos: [s * 0.0126, 0.034, -0.105 + i * 0.0055] });
+  mesh(rbox(0.003, 0.012, 0.04, 0.001), m.hole, slide, { pos: [0.0118, 0.038, -0.005], name: 'ejectionPort' });
+  mesh(rbox(0.014, 0.012, 0.036, 0.002), m.steel, slide, { pos: [0.004, 0.038, -0.005] }); // barrel hood
+  // sights: rear notch + front post with dots
+  for (const s of [-1, 1]) mesh(rbox(0.006, 0.008, 0.008, 0.0015), m.anodized, slide, { pos: [s * 0.006, 0.0505, 0.05] });
+  mesh(rbox(0.018, 0.003, 0.008, 0.001), m.anodized, slide, { pos: [0, 0.047, 0.05] });
+  mesh(rbox(0.0035, 0.008, 0.005, 0.001), m.anodized, slide, { pos: [0, 0.0505, -0.112] });
+  mesh(cyl(0.0012, 0.0012, 0.001, 10), m.lens, slide, { pos: [0, 0.052, -0.1095], rot: X90 });
+  group(root, { pos: [0, 0.0515, 0.05], name: 'sight' });
+  markings(slide, 'P-9  9x19mm', [-0.0127, 0.03, -0.06], 0.05);
+  // frame, rail, trigger guard, trigger
+  mesh(rbox(0.023, 0.018, 0.165, 0.004, 3), m.polymer, root, { pos: [0, 0.008, -0.025] });
+  mesh(rbox(0.021, 0.008, 0.05, 0.002), m.polymer, root, { pos: [0, -0.004, -0.085] });
+  for (let i = 0; i < 3; i++) mesh(rbox(0.022, 0.003, 0.004, 0.001), m.polymer, root, { pos: [0, -0.009, -0.07 - i * 0.012] });
+  mesh(rbox(0.012, 0.005, 0.05, 0.002), m.polymer, root, { pos: [0, -0.026, -0.02] });
+  mesh(rbox(0.012, 0.03, 0.005, 0.002), m.polymer, root, { pos: [0, -0.012, -0.045] });
+  mesh(rbox(0.006, 0.02, 0.006, 0.002), m.polymer, root, { pos: [0, -0.012, -0.012], rot: [0.3, 0, 0] });
+  // grip with stipple panels + mag base plate
+  const grip = group(root, { pos: [0, -0.005, 0.03], rot: [-0.26, 0, 0] });
+  mesh(rbox(0.028, 0.105, 0.052, 0.009, 3), m.polymer, grip, { pos: [0, -0.05, 0] });
+  for (const s of [-1, 1]) mesh(rbox(0.002, 0.07, 0.04, 0.003), m.fde, grip, { pos: [s * 0.0142, -0.05, 0.001] });
+  mesh(rbox(0.026, 0.012, 0.03, 0.004), m.polymer, grip, { pos: [0, 0.0, 0.028] }); // beavertail
+  const mag = group(grip, { pos: [0, -0.104, 0], name: 'mag' });
+  const ext = cfg.mag === 'ext';
+  mesh(rbox(0.024, ext ? 0.04 : 0.012, 0.048, 0.004), m.polymer, mag, { pos: [0, ext ? -0.014 : 0.0, 0] });
+  // barrel + muzzle
+  const muzzle = group(root, { pos: [0, 0.037, -0.124], name: 'muzzleBase' });
+  mesh(cyl(0.0055, 0.0055, 0.004, 16), m.hole, muzzle, { pos: [0, 0, -0.001], rot: X90 });
+  if (cfg.muzzle === 'suppressor') {
+    mesh(cyl(0.006, 0.006, 0.02, 20), m.steel, muzzle, { pos: [0, 0, -0.01], rot: X90 });
+    mesh(cyl(0.0165, 0.0165, 0.14, 36), m.parkerized, muzzle, { pos: [0, 0, -0.09], rot: X90 });
+    for (let i = 0; i < 4; i++) mesh(new THREE.TorusGeometry(0.0167, 0.001, 6, 36), m.anodizedEdge, muzzle, { pos: [0, 0, -0.04 - i * 0.03] });
+    muzzle.userData.tip = -0.16;
+  } else {
+    muzzle.userData.tip = 0;
+  }
+  finishMuzzle(root);
+  group(root, { pos: [0, -0.005, 0.03], rot: [-0.26, 0, 0], name: 'gripAnchor' });
+  group(root, { pos: [-0.03, -0.05, 0.04], name: 'guardAnchor' });
+  return root;
+}
+
+// ---------------------------------------------------------------- R-357 revolver
+
+function buildR357(m: Materials): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'weapon';
+  const st = m.steel;
+  // frame, topstrap, barrel with full underlug
+  mesh(rbox(0.03, 0.052, 0.07, 0.006, 3), st, root, { pos: [0, 0.012, 0.005] });
+  mesh(rbox(0.022, 0.01, 0.06, 0.003), st, root, { pos: [0, 0.042, -0.01] });
+  mesh(rbox(0.022, 0.034, 0.11, 0.005, 3), st, root, { pos: [0, 0.018, -0.1] });
+  mesh(cyl(0.0095, 0.0095, 0.12, 32), st, root, { pos: [0, 0.032, -0.1], rot: X90 });
+  mesh(rbox(0.006, 0.004, 0.1, 0.0015), st, root, { pos: [0, 0.042, -0.1] }); // vent rib
+  mesh(rbox(0.004, 0.012, 0.016, 0.0015), st, root, { pos: [0, 0.047, -0.148] }); // front ramp
+  mesh(rbox(0.0025, 0.004, 0.012, 0.001), m.laserRed, root, { pos: [0, 0.052, -0.148] }); // red insert
+  for (const s of [-1, 1]) mesh(rbox(0.005, 0.006, 0.01, 0.0015), st, root, { pos: [s * 0.006, 0.05, 0.03] }); // rear notch
+  group(root, { pos: [0, 0.05, 0.03], name: 'sight' });
+  markings(root, 'R-357  .357 MAG', [-0.0112, 0.02, -0.1], 0.06);
+  // cylinder on a crane that swings out to the left for reloads
+  const crane = group(root, { pos: [-0.012, -0.004, -0.02], name: 'cylinderSwing' });
+  const cylG = group(crane, { pos: [0.012, 0.028, 0], name: 'cylinder' });
+  mesh(cyl(0.0195, 0.0195, 0.042, 36), st, cylG, { rot: X90 });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    mesh(rbox(0.004, 0.006, 0.03, 0.002), m.hole, cylG, { pos: [Math.cos(a) * 0.019, Math.sin(a) * 0.019, 0], rot: [0, 0, a] });
+    const b = a - Math.PI / 6;
+    mesh(cyl(0.0048, 0.0048, 0.002, 16), m.brass, cylG, { pos: [Math.cos(b) * 0.0125, Math.sin(b) * 0.0125, 0.0215], rot: X90 });
+  }
+  mesh(cyl(0.004, 0.004, 0.05, 12), st, crane, { pos: [0.012, 0.028, -0.004], rot: X90 }); // ejector rod
+  group(root, { name: 'mag' });
+  // hammer, trigger, guard
+  const hammer = group(root, { pos: [0, 0.035, 0.04], name: 'hammer' });
+  mesh(rbox(0.008, 0.02, 0.012, 0.002), st, hammer, { pos: [0, 0.006, 0.004], rot: [-0.3, 0, 0] });
+  mesh(rbox(0.01, 0.005, 0.014, 0.002), st, hammer, { pos: [0, 0.016, 0.012] });
+  mesh(rbox(0.006, 0.022, 0.006, 0.002), st, root, { pos: [0, -0.02, -0.004], rot: [0.25, 0, 0] });
+  mesh(new THREE.TorusGeometry(0.018, 0.0028, 10, 24, Math.PI), st, root, { pos: [0, -0.016, -0.004], rot: [0, Math.PI / 2, Math.PI] });
+  // wooden grip panels
+  const grip = group(root, { pos: [0, -0.004, 0.04], rot: [-0.32, 0, 0] });
+  mesh(rbox(0.02, 0.1, 0.034, 0.006), st, grip, { pos: [0, -0.045, 0] });
+  for (const s of [-1, 1]) {
+    mesh(rbox(0.006, 0.096, 0.044, 0.008, 3), m.wood, grip, { pos: [s * 0.012, -0.048, 0.002] });
+    mesh(cyl(0.003, 0.003, 0.002, 12), m.brass, grip, { pos: [s * 0.0152, -0.05, 0.002], rot: Z90 });
+  }
+  const muzzle = group(root, { pos: [0, 0.032, -0.16], name: 'muzzleBase' });
+  mesh(cyl(0.005, 0.005, 0.004, 16), m.hole, muzzle, { pos: [0, 0, -0.001], rot: X90 });
+  muzzle.userData.tip = 0;
+  finishMuzzle(root);
+  group(root, { pos: [0, 0.03, -0.01], name: 'ejectionPort' });
+  group(root, { pos: [0, -0.004, 0.04], rot: [-0.32, 0, 0], name: 'gripAnchor' });
+  group(root, { pos: [-0.03, -0.05, 0.05], name: 'guardAnchor' });
+  return root;
 }

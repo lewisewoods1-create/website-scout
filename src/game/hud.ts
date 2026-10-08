@@ -83,6 +83,13 @@ const CSS = `
 #hud .hint { position: absolute; left: 16px; top: 190px; font-size: 13px; opacity: .6; letter-spacing: 1px; }
 #hud .dead .cls { font-size: 16px; opacity: .85; margin-top: 10px; font-family: 'Barlow', sans-serif; }
 #hud .dead .cls b { color: #f2d36b; }
+#hud .equip { position: absolute; right: 36px; bottom: 118px; display: flex; gap: 14px; font-size: 16px; letter-spacing: 1px; }
+#hud .equip span b { color: #f2d36b; font-size: 18px; }
+#hud .equip span.empty { opacity: .35; }
+#hud .whiteout { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+#hud .nade { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+#hud .nade i { position: absolute; left: -16px; top: -120px; width: 32px; height: 32px; border-radius: 50%; background: rgba(200,30,20,.85);
+  color: #fff; font-style: normal; font-size: 16px; line-height: 32px; text-align: center; transform-origin: 16px 120px; }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }
 @keyframes blink { 50% { opacity: .4 } }
@@ -129,6 +136,10 @@ export class Hud {
   private board: HTMLDivElement;
   private end: HTMLDivElement;
   private picker: HTMLDivElement;
+  private equipEl: HTMLDivElement;
+  private white: HTMLDivElement;
+  private nadeEl: HTMLDivElement;
+  private whiteT = 0;
   private hitT = 0;
   private bannerT = 0;
   private dmgArcs: { e: HTMLElement; t: number; angle: number }[] = [];
@@ -163,6 +174,9 @@ export class Hud {
     this.match = el('div', 'match', this.root);
     this.board = el('div', 'board', this.root);
     this.end = el('div', 'end', this.root);
+    this.equipEl = el('div', 'equip', this.root);
+    this.nadeEl = el('div', 'nade', this.root);
+    this.white = el('div', 'whiteout', this.root);
     this.picker = el('div', 'picker', this.root);
     el('div', 'hint', this.root, 'TAB · SCOREBOARD');
     this.map = el('canvas', 'map', this.root);
@@ -256,6 +270,26 @@ export class Hud {
     this.picker.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => onPick?.(Number(b.dataset.i))));
   }
 
+  equipment(frags: number, tac: number, tacName: string) {
+    const html = `<span class="${frags ? '' : 'empty'}">[G] FRAG <b>${frags}</b></span><span class="${tac ? '' : 'empty'}">[Q] ${tacName} <b>${tac}</b></span>`;
+    if (this.equipEl.innerHTML !== html) this.equipEl.innerHTML = html;
+  }
+
+  /** Stun flash: 0..1 strength. */
+  flash(k: number) {
+    this.whiteT = Math.max(this.whiteT, k * 2.2);
+  }
+
+  /** Danger markers for live frags near the player (screen rotation angles). */
+  grenades(angles: number[]) {
+    while (this.nadeEl.childElementCount < angles.length) el('i', '', this.nadeEl, '!');
+    [...this.nadeEl.children].forEach((c, i) => {
+      const e = c as HTMLElement;
+      e.style.display = i < angles.length ? '' : 'none';
+      if (i < angles.length) e.style.transform = `rotate(${angles[i]}rad)`;
+    });
+  }
+
   matchBar(html: string) {
     if (this.match.innerHTML !== html) this.match.innerHTML = html;
   }
@@ -292,6 +326,8 @@ export class Hud {
   update(dt: number, health: number, attackerAngle: (a: number) => number) {
     this.hitT -= dt;
     this.hit.style.opacity = this.hitT > 0 ? '1' : '0';
+    this.whiteT = Math.max(0, this.whiteT - dt);
+    this.white.style.opacity = String(Math.min(1, this.whiteT));
     this.bannerT -= dt;
     this.banner.style.opacity = this.bannerT > 0 ? '1' : '0';
     this.vignette.style.opacity = String(Math.min(1, ((100 - health) / 100) * 1.3));

@@ -36,6 +36,7 @@ export class Effects {
   private tracerIdx = 0;
   readonly worldFlash = new THREE.PointLight(0xffa040, 0, 9, 1.8);
   private flashT = 0;
+  private flashPower = 25;
   private enemyTracer: THREE.MeshBasicMaterial;
   private playerTracer: THREE.MeshBasicMaterial;
 
@@ -138,9 +139,45 @@ export class Effects {
     }
   }
 
+  /** Frag detonation: fireball, smoke column, sparks, scorch mark, light pulse. */
+  explosion(at: THREE.Vector3) {
+    for (let i = 0; i < 12; i++) {
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).multiplyScalar(5);
+      this.puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), v, 0xffc060, 0.5 + Math.random() * 0.5, 0.25 + Math.random() * 0.2, 2.5);
+    }
+    for (let i = 0; i < 14; i++) {
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() + 0.4, Math.random() - 0.5).multiplyScalar(2.2);
+      this.puff(at.clone().add(new THREE.Vector3(0, 0.4, 0)), v, 0x3a3430, 0.7 + Math.random() * 0.6, 1.4 + Math.random() * 1.2, 1.2);
+    }
+    for (let i = 0; i < 16; i++) {
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 1.2, Math.random() - 0.5).multiplyScalar(14);
+      this.puff(at.clone().add(new THREE.Vector3(0, 0.2, 0)), v, 0xffc060, 0.06, 0.3 + Math.random() * 0.3, 0);
+    }
+    const d = this.decals[this.decalIdx++ % this.decals.length];
+    d.position.copy(at).setY(0.015);
+    d.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI);
+    d.scale.setScalar(18 + Math.random() * 6);
+    d.visible = true;
+    this.worldFlash.position.copy(at).setY(at.y + 0.8);
+    this.flashT = 0.12;
+    this.flashPower = 160;
+  }
+
+  /** Stun grenade: white flash + light pulse, no fire. */
+  stunFlash(at: THREE.Vector3) {
+    for (let i = 0; i < 10; i++) {
+      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(3);
+      this.puff(at.clone().add(new THREE.Vector3(0, 0.2, 0)), v, 0xffffff, 0.4, 0.5 + Math.random() * 0.4, 1.8);
+    }
+    this.worldFlash.position.copy(at).setY(at.y + 0.6);
+    this.flashT = 0.15;
+    this.flashPower = 220;
+  }
+
   muzzle(at: THREE.Vector3) {
     this.worldFlash.position.copy(at);
     this.flashT = 0.05;
+    this.flashPower = 25;
   }
 
   update(dt: number) {
@@ -168,6 +205,6 @@ export class Effects {
       (p.s.material as THREE.SpriteMaterial).opacity = p.life / p.max;
     }
     this.flashT -= dt;
-    this.worldFlash.intensity = this.flashT > 0 ? 25 : 0;
+    this.worldFlash.intensity = this.flashT > 0 ? this.flashPower : 0;
   }
 }

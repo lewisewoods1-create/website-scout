@@ -91,7 +91,15 @@ A small companion that **floats just under the gun** in first person and reacts 
 
 ---
 
-## 5. Suggested order
+## 5. Ranks, emblems and banners
+
+- Levels 1–85, then Prestige 1–10 (manual, from Barracks; resets to level 1, keeps stats and weapon kills).
+- XP per level grows linearly: 800 XP for level 2, +140 per level after (about 555k XP to reach 85).
+- Rank insignia and prestige emblems are procedural placeholders. To use uploaded artwork, add image URLs
+  (or data URIs) to `EMBLEM_IMAGES` in `cosmetics.ts` with keys `prestige-1`…`prestige-10` and `rank-0`…`rank-16`.
+- Banners (calling cards) unlock by level and prestige; the Soldier tab picks the active one.
+
+## 6. Suggested order
 1. Stairs/second floors + 1 new map
 2. Supabase accounts and cloud saves, then public launch of bot mode
 3. Pets v1 (one pet, earned at level 5)

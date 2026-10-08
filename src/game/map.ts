@@ -132,6 +132,8 @@ export class MapBuilder {
       const m = new THREE.Mesh(merged, mat);
       m.layers.set(LAYER_WORLD);
       m.matrixAutoUpdate = false;
+      m.castShadow = true;
+      m.receiveShadow = true;
       this.root.add(m);
     }
   }

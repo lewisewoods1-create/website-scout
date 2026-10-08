@@ -43,6 +43,8 @@ export interface BotWorld {
   hit(target: Combatant, dmg: number, shooter: Bot, head: boolean, dir: THREE.Vector3): void;
   respawnPoint(bot: Bot): THREE.Vector3;
   shotFired(shooter: Combatant, suppressed: boolean): void;
+  smokeBlocks(a: THREE.Vector3, b: THREE.Vector3): boolean;
+  throwFrag(bot: Bot, at: THREE.Vector3): void;
 }
 
 export interface HitSphere {
@@ -127,6 +129,8 @@ export class Bot implements Combatant {
   private idleT = 0;
   private fallDir = 1;
   private thinkT = Math.random() * 0.1;
+  private nadeT = 8 + Math.random() * 10;
+  stunnedUntil = -99;
 
   constructor(id: number, name: string, scene: THREE.Scene) {
     this.id = id;
@@ -255,6 +259,7 @@ export class Bot implements Combatant {
       if (score >= bestD) continue;
       TMP.set(dx / d, dy / d, dz / d);
       if (raycastBoxes(w.map.boxes, eye, TMP, d)) continue;
+      if (w.smokeBlocks(eye, ce)) continue;
       best = c;
       bestD = score;
     }
@@ -272,10 +277,23 @@ export class Bot implements Combatant {
       return;
     }
     const now = w.now;
+    const stunned = now < this.stunnedUntil;
     this.thinkT -= dt;
-    if (this.thinkT <= 0 || (this.target && !this.target.alive)) {
+    if (stunned) {
+      this.target = null;
+      this.yaw += (Math.random() - 0.5) * 4 * dt;
+    } else if (this.thinkT <= 0 || (this.target && !this.target.alive)) {
       this.thinkT = 0.1;
       this.perceive(w);
+    }
+    // lob a frag at a recently-seen enemy that has broken line of sight
+    this.nadeT -= dt;
+    if (!stunned && this.state === 'hunt' && this.nadeT <= 0 && now - this.lastSeenT < 4) {
+      const d = this.pos.distanceTo(this.lastSeen);
+      if (d > 8 && d < 26) {
+        w.throwFrag(this, this.lastSeen.clone());
+        this.nadeT = 14 + Math.random() * 14;
+      }
     }
 
     const t = this.target;
@@ -351,6 +369,7 @@ export class Bot implements Combatant {
     }
 
     if (move.lengthSq() > 1) move.normalize();
+    if (stunned) speed *= 0.3;
     const step = move.multiplyScalar(speed * dt);
     const nav = w.map.nav;
     const bx = this.pos.x;

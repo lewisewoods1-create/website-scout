@@ -5,7 +5,8 @@ import { buildMap, raycastBoxes, type GameMap } from './map';
 import { mapById } from './maps';
 import { createMaterials, soldierMaterials } from './materials';
 import { buildSoldier } from './soldier';
-import { Bot, BOT_NAMES, raySphere, type BotWorld, type Combatant, type Difficulty } from './bot';
+import { Bot, BOT_NAMES, panFor, raySphere, type BotWorld, type Combatant, type Difficulty } from './bot';
+import { Throwables, type ThrowKind } from './throwables';
 import { Viewmodel, Gun } from './viewmodel';
 import { Player } from './player';
 import { Input } from './input';
@@ -13,8 +14,9 @@ import { Hud, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
-import { computeStats, loadClasses, type Loadout } from './loadout';
-import { loadProfile, saveProfile, levelForXp, xpForLevel, nextUnlock, UNLOCKS, XP, MAX_LEVEL, type Profile } from './progression';
+import { computeStats, loadClasses, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type WeaponId } from './loadout';
+import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
+import { nextUnlock, unlockTrack } from './unlocks';
 import { clamp, damp, lerp } from './util';
 
 export interface Settings {
@@ -98,7 +100,12 @@ export class Game {
   private sun = new THREE.DirectionalLight();
   private amb = new THREE.AmbientLight();
   private vm: Viewmodel;
-  private gun: Gun;
+  private guns: Gun[] = [];
+  private active = 0;
+  private frags = 1;
+  private tacs = 2;
+  private throwables!: Throwables<Combatant>;
+  private sunDir = new THREE.Vector3(-1, 1, 0).normalize();
   private player = new Player();
   private agent: PlayerAgent;
   private hud = new Hud();
@@ -140,6 +147,10 @@ export class Game {
   /** shared with the create-a-class preview */
   materials!: ReturnType<typeof createMaterials>;
   envMap!: THREE.Texture;
+  private get gun() {
+    return this.guns[this.active];
+  }
+
   /** called when the player clicks CONTINUE on the results screen */
   onExit: () => void = () => {};
 
@@ -159,6 +170,20 @@ export class Game {
       l.layers.enableAll();
       this.scene.add(l);
     }
+    // sun shadows follow the action; soldiers, grenades and world geometry cast
+    const sh = this.sun.shadow;
+    this.sun.castShadow = true;
+    sh.mapSize.set(2048, 2048);
+    sh.camera.left = -24;
+    sh.camera.right = 24;
+    sh.camera.top = 24;
+    sh.camera.bottom = -24;
+    sh.camera.near = 1;
+    sh.camera.far = 110;
+    sh.camera.layers.enable(LAYER_CHAR);
+    sh.bias = -0.0004;
+    sh.normalBias = 0.03;
+    this.scene.add(this.sun.target);
     // a camera-mounted light that only touches characters, so soldiers read clearly
     this.charLight.layers.set(LAYER_CHAR);
     this.scene.add(this.charLight, this.charLight.target);
@@ -169,14 +194,20 @@ export class Game {
     this.materials = mats;
     this.envMap = env;
     this.vm = new Viewmodel(mats, env);
-    this.gun = new Gun(computeStats(this.classes[0]));
+    this.guns = [new Gun(computeStats(this.classes[0])), new Gun(computeStats(this.classes[0], 'secondary'))];
+    this.throwables = new Throwables<Combatant>(this.scene, mats);
 
     const sm = soldierMaterials(mats);
+    this.soldierMats = sm;
     const opt = ['iron', 'reflex', 'holo'] as const;
+    const looks: SoldierLook[] = [
+      { uniform: 'desert', gear: 'coyote', head: 'nvg' },
+      { uniform: 'woodland', gear: 'ranger', head: 'helmet' },
+    ];
     for (const variant of [0, 1] as const) {
       for (const weapon of ['kr4', 'vk47'] as const) {
-        const cfg: WeaponCfg = { weapon, optic: opt[(variant + (weapon === 'kr4' ? 2 : 0)) % 3], muzzle: 'none', under: weapon === 'kr4' ? 'grip' : 'none', camo: 'none' };
-        const t = buildSoldier(sm, variant, cfg);
+        const cfg: WeaponCfg = { weapon, optic: opt[(variant + (weapon === 'kr4' ? 2 : 0)) % 3], muzzle: 'none', under: weapon === 'kr4' ? 'grip' : 'none', mag: 'std', camo: 'none' };
+        const t = buildSoldier(sm, looks[variant], cfg);
         t.userData.weapon = weapon;
         t.userData.variant = variant;
         this.templates.push(t);
@@ -198,6 +229,11 @@ export class Game {
       hit: (t, d, s, h, dir) => this.hit(t, d, s, h, dir),
       respawnPoint: (b) => this.pickSpawn(b),
       shotFired: (s, sup) => this.shotFired(s, sup),
+      smokeBlocks: (a, b) => this.throwables.smokeBlocks(a, b),
+      throwFrag: (bot, at) => {
+        const from = bot.eye(new THREE.Vector3());
+        this.throwables.throw('frag', from, Throwables.lob(from, at), bot);
+      },
     };
 
     this.applySettings();
@@ -238,6 +274,31 @@ export class Game {
     return { level: levelForXp(this.profile.xp), ...this.profile };
   }
 
+  /** Live profile for the menu (callsign, banner, look); call saveProfileNow after edits. */
+  get profileData() {
+    return this.profile;
+  }
+
+  saveProfileNow() {
+    saveProfile(this.profile);
+  }
+
+  get prestigeReady() {
+    return canPrestige(this.profile);
+  }
+
+  prestige() {
+    const ok = enterPrestige(this.profile);
+    if (ok) {
+      saveProfile(this.profile);
+      this.sfx.levelUp();
+    }
+    return ok;
+  }
+
+  /** Soldier-only PBR materials (rim lit), shared with the menu preview. */
+  soldierMats!: ReturnType<typeof createMaterials>;
+
   /** Swap the arena: rebuild geometry, nav grid, sky, fog and lighting. */
   loadMap(id: string) {
     if (this.map?.id === id) return;
@@ -256,9 +317,11 @@ export class Game {
     this.sun.color.setHex(t.sun[0]);
     this.sun.intensity = t.sun[1];
     this.sun.position.set(t.sun[2], t.sun[3], t.sun[4]);
+    this.sunDir.set(t.sun[2], t.sun[3], t.sun[4]).normalize();
     this.amb.color.setHex(t.ambient[0]);
     this.amb.intensity = t.ambient[1];
     this.effects?.clear();
+    this.throwables?.clear();
   }
 
   get mapId() {
@@ -269,6 +332,7 @@ export class Game {
 
   /** Menu background: bots fight each other while the camera orbits. */
   startAttract() {
+    this.throwables.clear();
     this.phase = 'attract';
     this.choosingClass = false;
     this.hud.classPicker(null);
@@ -289,6 +353,7 @@ export class Game {
   }
 
   startMatch(cfg: MatchConfig, classes: Loadout[]) {
+    this.throwables.clear();
     this.loadMap(cfg.mapId);
     this.cfg = cfg;
     this.classes = classes;
@@ -331,9 +396,9 @@ export class Game {
   private classCards(): [string, string][] {
     return this.classes.map((c) => {
       const s = computeStats(c);
-      const opt = { iron: 'Iron sights', reflex: 'Reflex', holo: 'Holographic' }[c.optic];
+      const opt = { iron: 'Iron sights', reflex: 'Reflex', holo: 'Holographic', acog: '4x scope' }[c.optic];
       const extras = [opt, c.muzzle === 'suppressor' ? 'Suppressor' : '', c.under === 'grip' ? 'Foregrip' : ''].filter(Boolean).join(' · ');
-      return [c.name, `${s.name}<br>${extras}`];
+      return [c.name, `${s.name} · ${WEAPONS[c.secondary].name}<br>${extras}`];
     });
   }
 
@@ -365,8 +430,12 @@ export class Game {
     this.classIdx = idx;
     const l = this.classes[idx];
     const stats = computeStats(l);
-    this.gun.reset(stats);
+    this.guns[0].reset(stats);
+    this.guns[1].reset(computeStats(l, 'secondary'));
+    this.active = 0;
     this.vm.equip(cfgFromLoadout(l), stats.eyeDist, stats.recoil);
+    this.frags = l.perk1 === 'pockets' ? 2 : 1;
+    this.tacs = 2;
     this.player.maxHealth = l.perk2 === 'tough' ? 130 : 100;
     this.player.speedMult = l.perk1 === 'fleet' ? 1.1 : 1;
   }
@@ -474,7 +543,7 @@ export class Game {
   /** Bot bullet landed on a target. */
   private hit(target: Combatant, dmg: number, shooter: Bot, head: boolean, dir: THREE.Vector3) {
     if (target.isPlayer) {
-      this.damagePlayer(dmg, shooter);
+      this.damagePlayer(dmg, shooter, shooter.pos);
       return;
     }
     const tb = target as Bot;
@@ -482,42 +551,111 @@ export class Game {
     if (tb.damage(dmg, shooter, this.now)) this.registerKill(shooter, tb, head);
   }
 
+  private throwItem(kind: ThrowKind) {
+    const cam = this.camera;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    const from = cam.position.clone().addScaledVector(fwd, 0.4).addScaledVector(right, 0.15).add(new THREE.Vector3(0, -0.1, 0));
+    const vel = fwd.multiplyScalar(kind === 'frag' ? 17 : 15).add(new THREE.Vector3(0, 3, 0)).addScaledVector(this.player.vel, 0.5);
+    this.throwables.throw(kind, from, vel, this.agent);
+    this.vm.throwAnim();
+    this.sfx.pin();
+    this.gun.reloading = -1;
+  }
+
+  /** Grenade went off: damage, stun or smoke. */
+  private detonate(kind: ThrowKind, pos: THREE.Vector3, owner: Combatant) {
+    const cam = this.camera.position;
+    const dist = pos.distanceTo(cam);
+    const pan = panFor(pos, cam, this.camera.rotation.y);
+    const lineClear = (to: THREE.Vector3) => {
+      const from = pos.clone().setY(pos.y + 0.3);
+      const dir = to.clone().sub(from);
+      const len = dir.length();
+      return !raycastBoxes(this.map.boxes, from, dir.divideScalar(len), len);
+    };
+    const tmp = new THREE.Vector3();
+    if (kind === 'smoke') {
+      this.sfx.smokePop(dist, pan);
+      return;
+    }
+    if (kind === 'frag') {
+      this.effects.explosion(pos);
+      this.sfx.explosion(dist, pan);
+      if (this.player.alive) this.punch += Math.max(0, 0.12 * (1 - dist / 18));
+      for (const c of [...this.world.combatants]) {
+        if (!c.alive) continue;
+        if (c !== owner && !this.hostile(owner, c)) continue;
+        const center = tmp.copy(c.pos).setY(c.pos.y + 0.9);
+        const d = center.distanceTo(pos);
+        if (d > 7 || !lineClear(center)) continue;
+        const dmg = 170 * Math.pow(1 - d / 7, 1.1);
+        if (c.isPlayer) this.damagePlayer(dmg, owner, pos, 'FRAG');
+        else if ((c as Bot).damage(dmg, owner, this.now)) this.registerKill(owner, c, false, 'FRAG');
+      }
+      return;
+    }
+    // stun
+    this.effects.stunFlash(pos);
+    this.sfx.stunBang(dist, pan);
+    for (const b of this.bots) {
+      if (!b.active || !b.alive || (b !== owner && !this.hostile(owner, b))) continue;
+      const d = b.eye(tmp).distanceTo(pos);
+      if (d < 10 && lineClear(b.eye(tmp))) b.stunnedUntil = this.now + 1 + 3 * (1 - d / 10);
+    }
+    if (this.player.alive) {
+      const d = cam.distanceTo(pos);
+      if (d < 10 && lineClear(cam.clone())) {
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const facing = Math.max(0, fwd.dot(pos.clone().sub(cam).normalize()));
+        this.hud.flash((1 - d / 10) * (0.35 + 0.65 * facing));
+      }
+    }
+  }
+
   private nameHtml(c: Combatant) {
     if (c.isPlayer) return `<span class="you">YOU</span>`;
     return this.isFriendly(c) ? `<span style="color:${ALLY}">${c.name}</span>` : `<span class="enemy">${c.name}</span>`;
   }
 
-  private registerKill(killer: Combatant, victim: Combatant, head: boolean) {
+  private registerKill(killer: Combatant, victim: Combatant, head: boolean, weapon?: string) {
     killer.kills++;
     victim.deaths++;
     if (this.phase !== 'match') return;
     if (this.cfg.mode === 'tdm') this.teamScore[killer.team === this.agent.team ? 0 : 1]++;
-    const wpn = killer.isPlayer ? this.gun.stats.name.split(' ')[0] : (killer as Bot).weapon === 'vk47' ? 'VK-47' : 'KR-4';
+    const wpn = weapon ?? (killer.isPlayer ? this.gun.stats.name.split(' ')[0] : (killer as Bot).weapon === 'vk47' ? 'VK-47' : 'KR-4');
     this.hud.killfeed(`${this.nameHtml(killer)} [${wpn}]${head ? ' ⌖' : ''} ${this.nameHtml(victim)}`);
-    if (killer.isPlayer) this.onPlayerKill(victim, head);
+    if (killer.isPlayer) this.onPlayerKill(victim, head, weapon === 'FRAG' ? 'frag' : this.gun.stats.weapon);
     const lim = MODES[this.cfg.mode].scoreLimit;
     const top = this.cfg.mode === 'tdm' ? Math.max(...this.teamScore) : Math.max(...this.world.combatants.map((c) => c.kills));
     if (top >= lim) this.endMatch();
   }
 
-  private damagePlayer(dmg: number, from: Bot) {
+  private damagePlayer(dmg: number, from: Combatant, at: THREE.Vector3, weapon?: string) {
     const p = this.player;
     if (!p.alive || this.phase !== 'match') return;
     p.health -= dmg;
     p.lastHit = this.now;
     this.punch += 0.02;
-    this.hud.damageFrom(Math.atan2(from.pos.x - p.pos.x, from.pos.z - p.pos.z));
+    this.hud.damageFrom(Math.atan2(at.x - p.pos.x, at.z - p.pos.z));
     this.sfx.hurt();
     if (p.health <= 0) {
       p.health = 0;
       p.alive = false;
-      this.killedBy = from.name;
       this.profile.deaths++;
       this.streak = 0;
       this.respawnT = 3.5;
       this.deathCam = 0;
       saveProfile(this.profile);
-      this.registerKill(from, this.agent, false);
+      if (from === this.agent) {
+        // own grenade: a death, but nobody scores
+        this.killedBy = 'YOUR OWN FRAG';
+        this.agent.deaths++;
+        this.hud.killfeed(`<span class="you">YOU</span> [FRAG] ✸`);
+      } else {
+        this.killedBy = from.name;
+        this.registerKill(from, this.agent, false, weapon);
+      }
     }
   }
 
@@ -584,10 +722,23 @@ export class Game {
     return s + this.bloom * lerp(1, 0.25, ads);
   }
 
-  private onPlayerKill(victim: Combatant, head: boolean) {
+  private onPlayerKill(victim: Combatant, head: boolean, weaponId: string) {
     const before = levelForXp(this.profile.xp);
     let xp = XP.kill;
     this.hud.popup(`+${XP.kill}`);
+    if (weaponId === 'frag') {
+      xp += XP.grenade;
+      this.hud.popup(`GRENADE KILL +${XP.grenade}`, 'hs');
+    }
+    // weapon progression: attachments unlock at kill counts
+    const n = (this.profile.weaponKills[weaponId] ?? 0) + 1;
+    this.profile.weaponKills[weaponId] = n;
+    const w = WEAPONS[weaponId as WeaponId];
+    if (w) {
+      const pool = w.slot === 'primary' ? [...OPTICS, ...MUZZLES, ...UNDERS, ...MAGS] : w.id === 'p9' ? SEC_ATTACH : [];
+      const got = pool.filter((c) => c.kills === n);
+      if (got.length) this.hud.showBanner('WEAPON UNLOCK', `${got.map((c) => c.name).join(' · ')} FOR ${w.name}`, 4);
+    }
     if (head) {
       xp += XP.headshot;
       this.hud.popup(`HEADSHOT +${XP.headshot}`, 'hs');
@@ -619,12 +770,13 @@ export class Game {
   }
 
   private addXp(xp: number, levelBefore: number) {
-    this.profile.xp += xp;
+    grantXp(this.profile, xp);
     this.matchXp += xp;
     const after = levelForXp(this.profile.xp);
     if (after > levelBefore) {
-      const unlock = UNLOCKS[after];
-      this.hud.showBanner('PROMOTED', `LEVEL ${after}${unlock ? ` · UNLOCKED: ${unlock}` : ''}`, 4);
+      const unlock = unlockTrack().get(after)?.join(' · ');
+      if (after >= MAX_LEVEL && canPrestige(this.profile)) this.hud.showBanner('LEVEL 85', 'PRESTIGE IS AVAILABLE IN BARRACKS', 5);
+      else this.hud.showBanner('PROMOTED', `LEVEL ${after}${unlock ? ` · UNLOCKED: ${unlock}` : ''}`, 4);
       this.sfx.levelUp();
     }
     saveProfile(this.profile);
@@ -693,7 +845,14 @@ export class Game {
     this.world.listener.copy(cam.position);
     this.world.listenerYaw = cam.rotation.y;
     for (const b of this.bots) b.update(dt, this.world);
+    this.throwables.update(dt, this.map.boxes, (k, pos, owner) => this.detonate(k, pos, owner));
     this.effects.update(dt);
+
+    // keep the shadow frustum centred on what the camera is looking at
+    const focus = this.phase === 'attract' || this.choosingClass ? new THREE.Vector3(0, 0, 0) : this.player.pos.clone();
+    this.sun.target.position.copy(focus);
+    this.sun.position.copy(focus).addScaledVector(this.sunDir, 50);
+    this.sun.target.updateMatrixWorld();
     this.input.endFrame();
   }
 
@@ -762,7 +921,25 @@ export class Game {
         this.sfx.streak();
         this.hud.showBanner('SWEEP ONLINE', 'ENEMY POSITIONS REVEALED');
       }
-      const canFire = !p.sprinting && this.vm.reload < 0;
+      // weapon swap: 1 / 2 / mouse wheel
+      const want = inp.pressed.has('Digit1') ? 0 : inp.pressed.has('Digit2') ? 1 : inp.wheel !== 0 ? 1 - this.active : this.active;
+      if (want !== this.active && !this.vm.busy) {
+        this.gun.reloading = -1;
+        this.active = want;
+        const st = this.gun.stats;
+        this.vm.switchTo(cfgFromLoadout(this.classes[this.classIdx], want ? 'secondary' : 'primary'), st.eyeDist, st.recoil);
+        this.sfx.click(900, 0.2);
+      }
+      // equipment
+      if (inp.pressed.has('KeyG') && this.frags > 0 && !this.vm.busy) {
+        this.frags--;
+        this.throwItem('frag');
+      }
+      if (inp.pressed.has('KeyQ') && this.tacs > 0 && !this.vm.busy) {
+        this.tacs--;
+        this.throwItem(this.classes[this.classIdx].tactical);
+      }
+      const canFire = !p.sprinting && this.vm.reload < 0 && !this.vm.busy;
       const shots = this.gun.update(dt, inp.fire, canFire);
       for (let i = 0; i < shots && this.phase === 'match'; i++) this.shoot();
       if (inp.fire && !this.wasFiring && this.gun.ammo === 0 && this.gun.reserve === 0) this.sfx.dryFire();
@@ -777,6 +954,7 @@ export class Game {
     }
     this.vm.reload = this.gun.reloading;
     this.vm.reloadEmpty = this.gun.emptyReload;
+    this.vm.slideLocked = this.gun.stats.weapon === 'p9' && this.gun.ammo === 0 && this.gun.reloading < 0;
     this.bloom = damp(this.bloom, 0, 4, dt);
     this.punch = damp(this.punch, 0, 10, dt);
     this.landDip = damp(this.landDip, 0, 8, dt);
@@ -825,6 +1003,16 @@ export class Game {
     // HUD
     const g = this.gun;
     this.hud.ammo(g.name, g.ammo, g.reserve, g.magSize, g.reloading >= 0);
+    this.hud.equipment(this.frags, this.tacs, this.classes[this.classIdx].tactical === 'stun' ? 'STUN' : 'SMOKE');
+    const nades: number[] = [];
+    for (const f of this.throwables.frags()) {
+      if (!p.alive || f.distanceTo(p.pos) > 9) continue;
+      let d = Math.PI - Math.atan2(f.x - p.pos.x, f.z - p.pos.z) + p.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      nades.push(d);
+    }
+    this.hud.grenades(nades);
     const spreadPx = (this.spread() / Math.tan(((cam.fov / 2) * Math.PI) / 180)) * (window.innerHeight / 2);
     this.hud.crosshair(spreadPx, this.vm.ads, !p.alive || p.sprinting);
     this.hud.update(dt, (p.health / p.maxHealth) * 100, (a) => {

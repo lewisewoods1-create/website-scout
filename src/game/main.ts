@@ -24,7 +24,9 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const boot = document.getElementById('boot') as HTMLDivElement;
 const settings = loadSettings();
 const classes = loadClasses();
+const t0 = performance.now();
 const game = new Game(canvas, settings);
+const tGame = performance.now() - t0;
 const debug = new URLSearchParams(location.search).has('debug');
 game.input.forceActive = debug;
 
@@ -138,9 +140,13 @@ function frame(t: number) {
   last = t;
   if (game.phase === 'ended' && document.pointerLockElement) document.exitPointerLock();
   if (!(game.phase === 'match' && game.paused)) game.update(dt);
+  const tr = performance.now();
   game.render();
+  if (debug && frameCount++ < 3) console.info(`[boot] frame ${frameCount} render ${(performance.now() - tr).toFixed(0)}ms`);
   requestAnimationFrame(frame);
 }
+let frameCount = 0;
 requestAnimationFrame(frame);
 
+if (debug) console.info(`[boot] game constructed in ${tGame.toFixed(0)}ms`);
 if (debug) Object.assign(window, { game, menu, finishBoot });

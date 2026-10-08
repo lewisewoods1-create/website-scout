@@ -76,6 +76,15 @@ export function attachHands(weapon: THREE.Object3D, m: Materials) {
   right.rotation.set(0, 0.08, 0);
   weapon.getObjectByName('gripAnchor')!.add(right);
 
+  if (weapon.userData.kind === 'pistol' || weapon.userData.kind === 'revolver') {
+    // two-handed pistol grip: support hand wraps the grip from the left, under the strong hand
+    const left = buildHand(m, -1, { curl: [1.15, 1.2, 1.25, 1.2], thumbCurl: 0.2 });
+    left.position.set(-0.03, -0.075, 0.035);
+    left.rotation.set(0.1, -0.55, -0.15);
+    weapon.getObjectByName('gripAnchor')!.add(left);
+    return { right, left };
+  }
+
   // left: palm under the handguard, fingers wrapping up the right side
   const left = buildHand(m, -1, { curl: [1.0, 1.05, 1.1, 1.1], thumbCurl: 0.3 });
   basis.makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0));

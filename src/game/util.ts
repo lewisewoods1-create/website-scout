@@ -21,7 +21,7 @@ export const smooth = (t: number) => t * t * (3 - 2 * t);
 
 const rboxCache = new Map<string, THREE.BufferGeometry>();
 /** Cached rounded box — the workhorse for the high-detail models. */
-export function rbox(w: number, h: number, d: number, r = 0.004, seg = 2): THREE.BufferGeometry {
+export function rbox(w: number, h: number, d: number, r = 0.004, seg = 3): THREE.BufferGeometry {
   const key = `${w}|${h}|${d}|${r}|${seg}`;
   let g = rboxCache.get(key);
   if (!g) {

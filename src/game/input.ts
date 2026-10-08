@@ -3,6 +3,8 @@ export class Input {
   readonly pressed = new Set<string>();
   mouseDX = 0;
   mouseDY = 0;
+  /** wheel notches this frame (+ down, - up) */
+  wheel = 0;
   fire = false;
   aim = false;
   locked = false;
@@ -38,6 +40,9 @@ export class Input {
       if (e.button === 0) this.fire = false;
       if (e.button === 2) this.aim = false;
     });
+    window.addEventListener('wheel', (e) => {
+      if (this.active) this.wheel += Math.sign(e.deltaY);
+    });
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.el;
@@ -64,5 +69,6 @@ export class Input {
     this.pressed.clear();
     this.mouseDX = 0;
     this.mouseDY = 0;
+    this.wheel = 0;
   }
 }

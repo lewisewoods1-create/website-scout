@@ -11,13 +11,21 @@ function canvas(w: number, h: number): [HTMLCanvasElement, Ctx] {
 }
 
 function noise(ctx: Ctx, w: number, h: number, rnd: () => number, amount: number, size = 1) {
-  for (let y = 0; y < h; y += size) {
-    for (let x = 0; x < w; x += size) {
+  // lighten/darken blocks in place via one ImageData pass (per-pixel fillRect is very slow)
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let by = 0; by < h; by += size) {
+    for (let bx = 0; bx < w; bx += size) {
       const v = (rnd() - 0.5) * amount;
-      ctx.fillStyle = v > 0 ? `rgba(255,255,255,${v})` : `rgba(0,0,0,${-v})`;
-      ctx.fillRect(x, y, size, size);
+      for (let y = by; y < Math.min(h, by + size); y++) {
+        for (let x = bx; x < Math.min(w, bx + size); x++) {
+          const i = (y * w + x) * 4;
+          for (let k = 0; k < 3; k++) d[i + k] = v > 0 ? d[i + k] + (255 - d[i + k]) * v : d[i + k] * (1 + v);
+        }
+      }
     }
   }
+  ctx.putImageData(img, 0, 0);
 }
 
 /** Low-res, point-sampled, tiling texture: the PS1 half of the look. */
@@ -255,6 +263,22 @@ export function puffTex() {
 
 // ---------------------------------------------------------------- hi-res (detail models)
 
+/** Grayscale height canvas filled from f(x, y) -> 0..1 via one ImageData write. */
+function heightCanvas(w: number, h: number, f: (x: number, y: number) => number): HTMLCanvasElement {
+  const [c, ctx] = canvas(w, h);
+  const img = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = Math.max(0, Math.min(255, f(x, y) * 255));
+      const i = (y * w + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
 /** Height map -> tangent-space normal map. */
 function heightToNormal(src: HTMLCanvasElement, strength: number): THREE.CanvasTexture {
   const w = src.width;
@@ -321,18 +345,13 @@ export function camoFabric(palette: string[], seed: number) {
   const map = hires(c);
 
   // weave height map
-  const [hc, hctx] = canvas(256, 256);
-  for (let y = 0; y < 256; y++) {
-    for (let x = 0; x < 256; x++) {
-      const warp = Math.sin((x / 4) * Math.PI) * 0.5 + 0.5;
-      const weft = Math.sin((y / 4) * Math.PI) * 0.5 + 0.5;
-      const over = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? warp : weft;
-      const rip = x % 32 < 2 || y % 32 < 2 ? 0.35 : 0;
-      const v = Math.min(1, over * 0.8 + rip + rnd() * 0.1) * 255;
-      hctx.fillStyle = `rgb(${v},${v},${v})`;
-      hctx.fillRect(x, y, 1, 1);
-    }
-  }
+  const hc = heightCanvas(256, 256, (x, y) => {
+    const warp = Math.sin((x / 4) * Math.PI) * 0.5 + 0.5;
+    const weft = Math.sin((y / 4) * Math.PI) * 0.5 + 0.5;
+    const over = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? warp : weft;
+    const rip = x % 32 < 2 || y % 32 < 2 ? 0.35 : 0;
+    return Math.min(1, over * 0.8 + rip + rnd() * 0.1);
+  });
   const normal = heightToNormal(hc, 2.5);
   normal.repeat.set(4, 4);
   return { map, normal };
@@ -351,14 +370,7 @@ export function corduraTex(color: string, seed: number) {
     ctx.fillRect(rnd() * 256, rnd() * 256, 4 + rnd() * 20, 2 + rnd() * 8);
   }
   const map = hires(c);
-  const [hc, hctx] = canvas(128, 128);
-  for (let y = 0; y < 128; y++) {
-    for (let x = 0; x < 128; x++) {
-      const v = (((x >> 1) + (y >> 1)) % 2) * 160 + rnd() * 60;
-      hctx.fillStyle = `rgb(${v},${v},${v})`;
-      hctx.fillRect(x, y, 1, 1);
-    }
-  }
+  const hc = heightCanvas(128, 128, (x, y) => ((((x >> 1) + (y >> 1)) % 2) * 160 + rnd() * 60) / 255);
   const normal = heightToNormal(hc, 1.5);
   normal.repeat.set(6, 6);
   return { map, normal };
@@ -390,20 +402,21 @@ export function scratchRoughness(seed: number, base = 150) {
 /** Polymer grip stipple: bumpy normal map. */
 export function stippleNormal(seed: number) {
   const rnd = mulberry32(seed);
-  const [hc, hctx] = canvas(256, 256);
-  hctx.fillStyle = '#000';
-  hctx.fillRect(0, 0, 256, 256);
+  const H = new Float32Array(256 * 256);
   for (let i = 0; i < 2200; i++) {
-    const g = hctx.createRadialGradient(0, 0, 0, 0, 0, 3);
-    g.addColorStop(0, 'rgba(255,255,255,0.9)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    hctx.save();
-    hctx.translate(rnd() * 256, rnd() * 256);
-    hctx.fillStyle = g;
-    hctx.fillRect(-3, -3, 6, 6);
-    hctx.restore();
+    const cx = rnd() * 256;
+    const cy = rnd() * 256;
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const d = Math.hypot(dx, dy) / 3;
+        if (d >= 1) continue;
+        const x = (Math.floor(cx) + dx + 256) & 255;
+        const y = (Math.floor(cy) + dy + 256) & 255;
+        H[y * 256 + x] = Math.min(1, H[y * 256 + x] + 0.9 * (1 - d));
+      }
+    }
   }
-  const n = heightToNormal(hc, 3);
+  const n = heightToNormal(heightCanvas(256, 256, (x, y) => H[y * 256 + x]), 3);
   n.repeat.set(3, 3);
   return n;
 }
@@ -729,4 +742,76 @@ export function drumTex(color: string, seed = 86) {
   for (const y of [6, 16, 26]) ctx.fillRect(0, y, 32, 2);
   noise(ctx, 32, 32, rnd, 0.18, 1);
   return retro(c);
+}
+
+/** 4x prism scope: illuminated chevron over a bullet-drop stadia. */
+export function acogReticleTex() {
+  const [c, ctx] = canvas(256, 256);
+  ctx.strokeStyle = 'rgba(10,10,10,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(128, 140);
+  ctx.lineTo(128, 236);
+  ctx.moveTo(20, 128);
+  ctx.lineTo(100, 128);
+  ctx.moveTo(156, 128);
+  ctx.lineTo(236, 128);
+  for (let i = 1; i <= 5; i++) {
+    const y = 140 + i * 16;
+    const w = 14 - i * 2;
+    ctx.moveTo(128 - w, y);
+    ctx.lineTo(128 + w, y);
+  }
+  ctx.stroke();
+  ctx.shadowColor = '#ff3a1a';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ff5a30';
+  ctx.beginPath();
+  ctx.moveTo(128, 120);
+  ctx.lineTo(140, 140);
+  ctx.lineTo(128, 133);
+  ctx.lineTo(116, 140);
+  ctx.closePath();
+  ctx.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const markCache = new Map<string, THREE.CanvasTexture>();
+/** Engraved roll-mark text on transparent background. */
+export function markingTex(text: string) {
+  let t = markCache.get(text);
+  if (t) return t;
+  const [c, ctx] = canvas(512, 64);
+  ctx.font = '600 34px "Barlow Condensed", Arial, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillText(text, 6, 34);
+  ctx.fillStyle = 'rgba(200,200,195,0.85)';
+  ctx.fillText(text, 4, 32);
+  t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  markCache.set(text, t);
+  return t;
+}
+
+/** Soft, slightly lumpy smoke puff. */
+export function smokeTex() {
+  const rnd = mulberry32(77);
+  const [c, ctx] = canvas(64, 64);
+  for (let i = 0; i < 9; i++) {
+    const x = 20 + rnd() * 24;
+    const y = 20 + rnd() * 24;
+    const r = 14 + rnd() * 14;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.7)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }

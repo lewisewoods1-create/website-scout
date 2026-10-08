@@ -11,14 +11,21 @@ export function createMaterials() {
   const coyote = T.corduraTex('#7b6a4f', 61);
   const ranger = T.corduraTex('#4a4d3c', 62);
   const black = T.corduraTex('#202020', 63);
+  const blackGear = T.corduraTex('#262626', 64);
+  const camoUrban = T.camoFabric(['#7c8086', '#5a5e63', '#a0a4a8', '#3a3d41'], 53);
+  const camoNight = T.camoFabric(['#2a2c2f', '#1c1d1f', '#3a3c40', '#121314'], 54);
 
-  const fabric = (src: { map: THREE.Texture; normal: THREE.Texture }, rough = 0.92) =>
-    new THREE.MeshStandardMaterial({
+  // cloth: sheen gives the soft fibre highlight real fabric has at grazing angles
+  const fabric = (src: { map: THREE.Texture; normal: THREE.Texture }, rough = 0.92): THREE.MeshStandardMaterial =>
+    new THREE.MeshPhysicalMaterial({
       map: src.map,
       normalMap: src.normal,
       normalScale: new THREE.Vector2(0.9, 0.9),
       roughness: rough,
       metalness: 0,
+      sheen: 0.7,
+      sheenRoughness: 0.75,
+      sheenColor: new THREE.Color(0x9a9282),
     });
 
   // viewmodel sleeves sit ~30cm from the camera, so tighten the pattern
@@ -28,7 +35,7 @@ export function createMaterials() {
 
   return {
     // gun
-    anodized: new THREE.MeshStandardMaterial({ color: 0x1c1e20, metalness: 0.65, roughness: 0.45, roughnessMap: scratches }),
+    anodized: new THREE.MeshPhysicalMaterial({ color: 0x1c1e20, metalness: 0.65, roughness: 0.45, roughnessMap: scratches, clearcoat: 0.25, clearcoatRoughness: 0.35 }) as THREE.MeshStandardMaterial,
     anodizedEdge: new THREE.MeshStandardMaterial({ color: 0x2a2c2e, metalness: 0.8, roughness: 0.3, roughnessMap: scratchesLight }),
     polymer: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0, roughness: 0.72, normalMap: stipple, normalScale: new THREE.Vector2(0.4, 0.4) }),
     fde: new THREE.MeshStandardMaterial({ color: 0x8a7656, metalness: 0.05, roughness: 0.62, normalMap: stipple, normalScale: new THREE.Vector2(0.3, 0.3) }),
@@ -43,10 +50,14 @@ export function createMaterials() {
     wood: new THREE.MeshStandardMaterial({ map: T.woodTex(), roughness: 0.45, metalness: 0, roughnessMap: scratchesLight }),
     bakelite: new THREE.MeshStandardMaterial({ color: 0x5a2418, roughness: 0.35, metalness: 0.05, roughnessMap: scratchesLight }),
     lens: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d6, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.1 }),
+    laserRed: new THREE.MeshStandardMaterial({ color: 0xff2a1a, emissive: 0xff2a1a, emissiveIntensity: 2, roughness: 0.2 }),
     // soldier
     camo: fabric(camo),
     camoClose: fabric(camoClose),
     camoAlt: fabric(camoAlt),
+    camoUrban: fabric(camoUrban),
+    camoNight: fabric(camoNight),
+    gearBlack: fabric(blackGear, 0.82),
     coyote: fabric(coyote, 0.85),
     ranger: fabric(ranger, 0.85),
     webbing: fabric(black, 0.8),
@@ -91,7 +102,7 @@ export function addRim(mat: THREE.MeshStandardMaterial) {
 /** Character-only copies of materials the viewmodel also uses, with rim light. */
 export function soldierMaterials(m: Materials): Materials {
   const c = { ...m };
-  for (const k of ['camo', 'camoAlt', 'coyote', 'ranger', 'webbing', 'skin', 'glove', 'gloveKnuckle', 'boot', 'helmet', 'polymer', 'rubber'] as const) {
+  for (const k of ['camo', 'camoAlt', 'camoUrban', 'camoNight', 'gearBlack', 'coyote', 'ranger', 'webbing', 'skin', 'glove', 'gloveKnuckle', 'boot', 'helmet', 'polymer', 'rubber'] as const) {
     const mat = m[k].clone();
     addRim(mat);
     c[k] = mat;

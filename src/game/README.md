@@ -27,7 +27,9 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | `viewmodel.ts` | First-person animation: sway, bob, ADS, recoil, reload, muzzle flash, brass. `Gun` holds the fire control |
 | `bot.ts` | AI states patrol → engage → hunt; reaction time, strafing, burst fire, accuracy model |
 | `player.ts` | Movement: sprint, crouch, slide, jump, step-up, health regen |
-| `progression.ts` | 70-level XP curve, unlock table, local profile |
+| `progression.ts`, `unlocks.ts` | Levels 1–85 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
+| `cosmetics.ts` | Banners, rank insignia, prestige emblems (uploadable), soldier looks, player card |
+| `throwables.ts` | Frag, smoke and stun grenades: bounce physics, fuses, smoke that blocks vision |
 | `hud.ts`, `audio.ts`, `effects.ts`, `textures.ts`, `materials.ts` | HUD, synthesised SFX, low-res FX, procedural textures, PBR materials |
 
 ## Roadmap
