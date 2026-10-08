@@ -80,6 +80,20 @@ deploy.addEventListener('click', () => {
     return;
   }
   game.input.lock();
+  // Some embeds refuse pointer lock: fall back to free mouse-look
+  setTimeout(() => {
+    if (document.pointerLockElement === canvas) return;
+    game.input.forceActive = true;
+    menu.style.display = 'none';
+    game.setPaused(false);
+  }, 500);
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && game.input.forceActive && !debug && !game.paused) {
+    game.input.forceActive = false;
+    showMenu(true);
+  }
 });
 
 document.addEventListener('pointerlockchange', () => {
