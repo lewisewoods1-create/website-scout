@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Materials } from './materials';
 import { buildWeapon, type WeaponCfg } from './weapons';
-import { attachHands } from './hands';
+import { attachHands, buildHand } from './hands';
+import { buildGrenadeModels, type ThrowKind } from './throwables';
 import { flashTex } from './textures';
 import type { GunStats } from './loadout';
 import { clamp, damp, lerp, mesh, orientLimb, smooth } from './util';
@@ -22,6 +23,40 @@ const POSES = {
 };
 
 type Kind = 'rifle' | 'pistol' | 'revolver';
+
+/** Seconds for a full throw: gun down, pin, wind-up, release, follow-through, gun up. */
+export const THROW_TIME = 0.95;
+const PIN_AT = 0.36;
+const RELEASE_AT = 0.6;
+
+type Key = [t: number, x: number, y: number, z: number, rx: number, ry: number, rz: number];
+// right (throwing) hand, camera space
+const KEYS_R: Key[] = [
+  [0.06, 0.17, -0.44, -0.36, 0.2, 0, 0],
+  [0.26, 0.1, -0.15, -0.36, 0.55, 0, 0.12],
+  [0.4, 0.1, -0.145, -0.35, 0.55, 0, 0.12],
+  [0.54, 0.23, -0.03, -0.17, 1.35, 0.2, -0.35],
+  [0.61, 0.03, -0.01, -0.52, -0.25, -0.1, 0.25],
+  [0.82, -0.08, -0.44, -0.42, -0.7, -0.2, 0.35],
+];
+// left hand: comes up to pull the pin, then drops away
+const KEYS_L: Key[] = [
+  [0.06, -0.19, -0.46, -0.34, 0.2, -0.4, 0],
+  [0.24, -0.06, -0.18, -0.33, 0.35, -0.6, -0.2],
+  [0.36, -0.06, -0.18, -0.33, 0.35, -0.6, -0.2],
+  [0.45, -0.15, -0.21, -0.3, 0.2, -0.3, -0.4],
+  [0.6, -0.22, -0.5, -0.3, 0, -0.2, -0.4],
+];
+
+function sampleKeys(keys: Key[], t: number, pos: THREE.Vector3, rot: THREE.Euler) {
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+  const a = keys[i];
+  const b = keys[i + 1];
+  const k = smooth(clamp((t - a[0]) / (b[0] - a[0]), 0, 1));
+  pos.set(lerp(a[1], b[1], k), lerp(a[2], b[2], k), lerp(a[3], b[3], k));
+  rot.set(lerp(a[4], b[4], k), lerp(a[5], b[5], k), lerp(a[6], b[6], k));
+}
 
 interface Built {
   rifle: THREE.Group;
@@ -55,6 +90,16 @@ export class Viewmodel {
   private switchT = -1;
   private pending: (() => void) | null = null;
   private throwT = -1;
+  private throwRig = new THREE.Group();
+  private throwR!: THREE.Group;
+  private throwL!: THREE.Group;
+  private sleeveTR!: THREE.Mesh;
+  private sleeveTL!: THREE.Mesh;
+  private held!: Record<ThrowKind, THREE.Group>;
+  private heldKind: ThrowKind = 'frag';
+  private pulledPin!: THREE.Object3D;
+  private onPin: (() => void) | null = null;
+  private onRelease: (() => void) | null = null;
   private slideKick = 0;
   private cylAngle = 0;
   private cylTarget = 0;
@@ -116,6 +161,7 @@ export class Viewmodel {
     this.flash.visible = false;
     this.flashLight.position.z = -0.05;
     this.mats = m;
+    this.buildThrowRig(m);
     this.equip({ weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'none', mag: 'std', camo: 'none' }, 0.24, 1);
 
     const shellGeo = new THREE.CylinderGeometry(0.0048, 0.0048, 0.045, 10);
@@ -125,6 +171,29 @@ export class Viewmodel {
       this.camera.add(s);
       this.shells.push({ m: s, v: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0 });
     }
+  }
+
+  /** Bare hands + sleeves used for grenade throws; lives in camera space, separate from the gun. */
+  private buildThrowRig(m: Materials) {
+    this.camera.add(this.throwRig);
+    this.throwRig.visible = false;
+    this.throwR = buildHand(m, 1, { curl: [1.05, 1.1, 1.15, 1.2], thumbCurl: 0.95 });
+    this.throwL = buildHand(m, -1, { curl: [0.75, 1.45, 1.55, 1.55], thumbCurl: 0.7 });
+    const sleeveGeo = new THREE.CylinderGeometry(0.04, 0.046, 1, 24, 1, true);
+    this.sleeveTR = mesh(sleeveGeo, m.camoClose, this.throwRig);
+    this.sleeveTL = mesh(sleeveGeo, m.camoClose, this.throwRig);
+    this.throwRig.add(this.throwR, this.throwL);
+    this.held = buildGrenadeModels(m, 0);
+    for (const g of Object.values(this.held)) {
+      g.position.set(-0.048, 0.006, -0.072);
+      g.visible = false;
+      this.throwR.add(g);
+    }
+    // the ring the left hand pulls free, pinched between index and thumb
+    this.pulledPin = this.held.frag.getObjectByName('pin')!.clone();
+    this.pulledPin.position.set(0.012, 0.03, -0.1);
+    this.pulledPin.rotation.set(0.4, 0, Math.PI / 2);
+    this.throwL.add(this.pulledPin);
   }
 
   private build(cfg: WeaponCfg): Built {
@@ -193,8 +262,69 @@ export class Viewmodel {
     this.switchT = 0;
   }
 
-  throwAnim() {
+  /** Throw `kind`: callbacks fire when the pin comes out and when the grenade leaves the hand. */
+  throwAnim(kind: ThrowKind, onPin?: () => void, onRelease?: () => void) {
     this.throwT = 0;
+    this.heldKind = kind;
+    this.onPin = onPin ?? null;
+    this.onRelease = onRelease ?? null;
+    for (const [k, g] of Object.entries(this.held)) {
+      g.visible = k === kind;
+      g.getObjectByName('pin')!.visible = true;
+    }
+    this.pulledPin.visible = false;
+  }
+
+  /** Abort a throw (death, respawn, match end). Returns the kind if its pin was already out. */
+  cancelThrow(): ThrowKind | null {
+    const live = this.throwT >= 0 && !this.onPin && !!this.onRelease ? this.heldKind : null;
+    this.throwT = -1;
+    this.onPin = this.onRelease = null;
+    this.throwRig.visible = false;
+    return live;
+  }
+
+  private animateThrow() {
+    const t = this.throwT;
+    const show = t >= 0.06 && t < 0.82;
+    this.throwRig.visible = show;
+    if (t >= PIN_AT && this.onPin) {
+      const f = this.onPin;
+      this.onPin = null;
+      this.held[this.heldKind].getObjectByName('pin')!.visible = false;
+      this.pulledPin.visible = true;
+      f();
+    }
+    if (t >= RELEASE_AT && this.onRelease) {
+      const f = this.onRelease;
+      this.onRelease = null;
+      this.held[this.heldKind].visible = false;
+      f();
+    }
+    if (!show) return;
+    const R = this.throwR;
+    const L = this.throwL;
+    sampleKeys(KEYS_R, t, R.position, R.rotation);
+    sampleKeys(KEYS_L, t, L.position, L.rotation);
+    // left fingers meet the pin ring before the pull
+    const reach = smooth(clamp((t - 0.22) / 0.1, 0, 1)) * (1 - smooth(clamp((t - PIN_AT) / 0.05, 0, 1)));
+    if (reach > 0) {
+      R.updateMatrixWorld(true);
+      const pin = this.held[this.heldKind].getObjectByName('pin')!.getWorldPosition(new THREE.Vector3());
+      this.throwRig.worldToLocal(pin);
+      // the pinch point sits ~(0.012, 0.03, -0.1) from the wrist; aim the wrist so it lands on the ring
+      L.position.lerp(pin.add(new THREE.Vector3(-0.07, -0.03, 0.06)), reach);
+    }
+    // the pull: a sharp tug down-left right after the pin comes out
+    const tug = smooth(clamp((t - PIN_AT) / 0.05, 0, 1)) * (1 - smooth(clamp((t - 0.45) / 0.1, 0, 1)));
+    L.position.add(new THREE.Vector3(-0.05 * tug, -0.02 * tug, 0.02 * tug));
+    const wrist = new THREE.Vector3();
+    const limb = (hand: THREE.Group, sleeve: THREE.Mesh, elbow: THREE.Vector3) => {
+      wrist.set(0, 0, 0.035).applyEuler(hand.rotation).add(hand.position);
+      orientLimb(sleeve, wrist, elbow);
+    };
+    limb(R, this.sleeveTR, new THREE.Vector3(0.3, -0.5, 0.05).lerp(R.position.clone().add(new THREE.Vector3(0.12, -0.32, 0.3)), 0.5));
+    limb(L, this.sleeveTL, new THREE.Vector3(-0.3, -0.5, 0.05).lerp(L.position.clone().add(new THREE.Vector3(-0.12, -0.32, 0.3)), 0.5));
   }
 
   /** True while switching or throwing: can't fire or aim. */
@@ -274,9 +404,12 @@ export class Viewmodel {
       if (this.switchT >= 1) this.switchT = -1;
     }
     if (this.throwT >= 0) {
-      this.throwT += dt / 0.55;
-      lower = Math.max(lower, Math.sin(Math.min(1, this.throwT) * Math.PI));
-      if (this.throwT >= 1) this.throwT = -1;
+      this.throwT += dt / THROW_TIME;
+      const t = Math.min(1, this.throwT);
+      // gun drops out of frame first and only comes back after the follow-through
+      lower = Math.max(lower, smooth(clamp(t / 0.14, 0, 1)) * (1 - smooth(clamp((t - 0.78) / 0.22, 0, 1))));
+      this.animateThrow();
+      if (this.throwT >= 1) this.cancelThrow();
     }
     this.slideKick = damp(this.slideKick, 0, 28, dt);
     this.cylAngle = damp(this.cylAngle, this.cylTarget, 18, dt);
@@ -336,11 +469,14 @@ export class Viewmodel {
 
     if (t >= 0) {
       const env = smooth(clamp(t / 0.14, 0, 1)) * smooth(clamp((1 - t) / 0.16, 0, 1));
-      const tilt = w.kind === 'rifle' ? 1 : 0.7;
-      w.rifle.rotation.z = 0.5 * env * tilt;
-      w.rifle.rotation.x = 0.18 * env;
-      w.rifle.rotation.y = -0.12 * env;
-      w.rifle.position.y = -0.02 * env;
+      // cant the gun across the body so the mag well turns toward the support hand
+      // (muzzle swings left and rolls right; pitching up/right instead makes it read as vertical from the hip)
+      const rifle = w.kind === 'rifle';
+      w.rifle.rotation.z = -(rifle ? 0.5 : 0.4) * env;
+      w.rifle.rotation.x = (rifle ? 0.12 : 0.1) * env;
+      w.rifle.rotation.y = (rifle ? 0.32 : 0.3) * env;
+      w.rifle.position.x = -0.03 * env;
+      w.rifle.position.y = 0.015 * env;
 
       if (w.kind === 'revolver' && w.crane) {
         // swing the cylinder out, dump brass, load, close
@@ -359,13 +495,24 @@ export class Viewmodel {
         w.mag.position.y -= drop * (w.kind === 'pistol' ? 0.2 : 0.28);
         w.mag.position.z += drop * 0.05;
         w.mag.visible = !(t > 0.33 && t < 0.4);
-        const handK = smooth(clamp((t - 0.08) / 0.16, 0, 1)) * smooth(clamp((0.8 - t) / 0.12, 0, 1));
-        const magTarget = new THREE.Vector3(-0.05, -0.12, -0.02).add(w.mag.position).sub(w.magHome);
-        if (w.kind === 'rifle') w.handL.position.lerp(magTarget, handK);
-        if (this.reloadEmpty && w.charging && t > 0.76 && t < 0.92) {
-          const k = (t - 0.76) / 0.16;
-          w.charging.position.z = w.chargingHome.z + (k < 0.5 ? smooth(k * 2) : 1 - smooth((k - 0.5) * 2)) * (w.kind === 'pistol' ? 0.03 : 0.07);
+        const pistol = w.kind === 'pistol';
+        const handK = smooth(clamp((t - 0.08) / 0.16, 0, 1)) * smooth(clamp((0.76 - t) / 0.12, 0, 1));
+        // the support hand leaves the gun, follows the old mag down, and brings the new one up
+        const magTarget = pistol
+          ? new THREE.Vector3(-0.03, -0.09 - drop * 0.06, 0.03).add(w.handLHome)
+          : new THREE.Vector3(-0.05, -0.12, -0.02).add(w.mag.position).sub(w.magHome);
+        w.handL.position.lerp(magTarget, handK);
+        if (this.reloadEmpty && w.charging && !pistol && t > 0.74 && t < 0.94) {
+          // rifle: support hand reaches up to the charging handle and racks it
+          const k = (t - 0.74) / 0.2;
+          const reach = smooth(clamp(k / 0.3, 0, 1)) * smooth(clamp((1 - k) / 0.25, 0, 1));
+          const pull = k < 0.3 ? 0 : k < 0.6 ? smooth((k - 0.3) / 0.3) : 1 - smooth((k - 0.6) / 0.15);
+          w.charging.position.z = w.chargingHome.z + Math.max(0, pull) * 0.07;
+          const grip = w.chargingHome.clone().add(new THREE.Vector3(-0.03, 0.01, 0.02 + Math.max(0, pull) * 0.07));
+          w.handL.position.lerp(grip, reach);
         }
+        // pistol: slide stays locked back until the release at 0.8, then slams home
+        if (pistol && this.reloadEmpty && w.charging && t >= 0.8) w.charging.position.z += 0.024 * (1 - smooth(clamp((t - 0.8) / 0.04, 0, 1)));
       }
     }
     const wrist = w.rifle.worldToLocal(w.handL.getWorldPosition(new THREE.Vector3()));
@@ -409,6 +556,12 @@ export class Gun {
     this.reserve = stats.reserve;
     this.reloading = -1;
     this.cool = 0;
+    this.lastTrigger = false;
+  }
+
+  /** Abandon a reload in progress (weapon switch, grenade throw). Rounds stay where they were. */
+  cancelReload() {
+    this.reloading = -1;
   }
 
   damageAt(dist: number) {
@@ -424,9 +577,11 @@ export class Gun {
   }
 
   /** Advance timers; returns how many rounds leave the barrel this frame. */
-  update(dt: number, trigger: boolean, canFire: boolean): number {
+  update(dt: number, trigger: boolean, canFire: boolean, busy = false): number {
     this.cool -= dt;
     if (this.reloading >= 0) {
+      this.lastTrigger = trigger;
+      if (busy) return 0;
       this.reloading += dt / this.reloadDur;
       if (this.reloading >= 1) {
         const take = Math.min(this.magSize - this.ammo, this.reserve);

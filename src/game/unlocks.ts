@@ -1,4 +1,4 @@
-import { CAMOS, PERKS1, PERKS2, PERKS3, SECONDARIES, TACTICALS, type Choice } from './loadout';
+import { PERKS1, PERKS2, PERKS3, SECONDARIES, TACTICALS, type Choice } from './loadout';
 import { BANNERS, GEAR, HEADGEAR, UNIFORMS } from './cosmetics';
 import { MAX_LEVEL } from './progression';
 
@@ -13,7 +13,6 @@ export function unlockTrack(): Map<number, string[]> {
   list(SECONDARIES, 'SIDEARM');
   list(TACTICALS, 'TACTICAL');
   list([...PERKS1, ...PERKS2, ...PERKS3], 'PERK');
-  list(CAMOS, 'CAMO');
   list(UNIFORMS, 'UNIFORM');
   list(GEAR, 'GEAR');
   list(HEADGEAR, 'HEADGEAR');

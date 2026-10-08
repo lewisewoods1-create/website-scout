@@ -1,6 +1,7 @@
 import type { Choice } from './loadout';
 import { MAX_LEVEL, xpForLevel, levelForXp, type Profile } from './progression';
 import { badgeImg, rankInfo } from './badges';
+import { BANNER_ART_EXT, BANNER_ART_READY, CATEGORIES, CHALLENGES } from './challenges';
 
 /**
  * Banners (calling cards), soldier looks and the player card.
@@ -12,6 +13,8 @@ export interface Banner {
   name: string;
   level?: number;
   prestige?: number;
+  /** unlocked by completing this challenge id */
+  challenge?: string;
   bg: string;
   motif?: string;
 }
@@ -32,7 +35,7 @@ export const BANNERS: Banner[] = [
   { id: 'nightops', name: 'NIGHT OPS', level: 45, bg: 'repeating-linear-gradient(0deg,#0b2a12 0 2px,#124a1e 2px 4px)', motif: skull },
   { id: 'reaper', name: 'REAPER', level: 55, bg: 'linear-gradient(90deg,#050505,#2a2a2a)', motif: skull },
   { id: 'gold', name: 'GOLD STANDARD', level: 70, bg: 'linear-gradient(115deg,#7a5a1a,#f2dc8a 45%,#c9a24a 55%,#7a5a1a)' },
-  { id: 'commander', name: 'COMMANDER', level: 85, bg: 'linear-gradient(90deg,#0b0809,#2a1f10)', motif: star },
+  { id: 'commander', name: 'COMMANDER', level: 75, bg: 'linear-gradient(90deg,#0b0809,#2a1f10)', motif: star },
   ...Array.from({ length: 10 }, (_, i) => ({
     id: `prestige${i + 1}`,
     name: `PRESTIGE ${i + 1}`,
@@ -40,10 +43,26 @@ export const BANNERS: Banner[] = [
     bg: `linear-gradient(115deg, hsl(${(i * 36 + 200) % 360} 50% 12%), hsl(${(i * 36 + 200) % 360} 60% 32%) 60%, hsl(${(i * 36 + 220) % 360} 70% 50%))`,
     motif: star,
   })),
+  ...CHALLENGES.map((c): Banner => {
+    const cat = CATEGORIES[c.cat];
+    const h = cat.hue;
+    const num = String(c.n).padStart(3, '0');
+    // placeholder until the artwork pack lands: category colour, brighter per tier, numbered
+    const art = BANNER_ART_READY ? `url(banners/ch-${num}.${BANNER_ART_EXT}) center/cover, ` : '';
+    const sheen = `repeating-linear-gradient(115deg, rgba(255,255,255,${0.02 + c.tier * 0.015}) 0 6px, transparent 6px ${14 + c.tier * 4}px)`;
+    return {
+      id: `ch${num}`,
+      name: c.name,
+      challenge: c.id,
+      bg: `${art}${sheen}, linear-gradient(115deg, hsl(${h} 45% 9%), hsl(${h} 55% ${18 + c.tier * 5}%) 60%, hsl(${h} 70% ${32 + c.tier * 6}%))`,
+      motif: BANNER_ART_READY ? undefined : `<svg viewBox="0 0 40 40"><path fill="hsl(${h} 80% 72% / .8)" d="${cat.icon}"/></svg>`,
+    };
+  }),
 ];
 
-export function bannerUnlocked(b: Banner, level: number, prestige: number, all = false) {
+export function bannerUnlocked(b: Banner, level: number, prestige: number, all = false, done: string[] = []) {
   if (all) return true;
+  if (b.challenge) return done.includes(b.challenge);
   if (b.prestige) return prestige >= b.prestige;
   return prestige > 0 || level >= (b.level ?? 1);
 }

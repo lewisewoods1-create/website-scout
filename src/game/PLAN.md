@@ -93,13 +93,16 @@ A small companion that **floats just under the gun** in first person and reacts 
 
 ## 5. Ranks, emblems and banners
 
-- Levels 1–85, then Prestige 1–10 (manual, from Barracks; resets to level 1, keeps stats and weapon kills).
-- XP per level grows linearly: 800 XP for level 2, +140 per level after (about 555k XP to reach 85).
+- Levels 1–75, then Prestige 1–10 (manual, from Barracks; resets to level 1, keeps stats and weapon kills).
+- XP per level grows linearly: 800 XP for level 2, +140 per level after (about 437k XP to reach 75).
 - Badges come from the Dead Pixels badge pack. Its generator (`vendor/badges.js`) renders every badge as
   vector SVG at runtime (output is byte-identical to the pack's SVG files), and animates prestige 4-10 live.
-  The pack defines 75 levels (25 ranks x 3 tiers); levels 76-85 currently reuse the Commander III badge.
-  Either add 10 more badges to the generator or set `MAX_LEVEL` to 75 in `progression.ts`.
-- Banners (calling cards) unlock by level and prestige; the Soldier tab picks the active one.
+  The pack defines 75 levels (25 ranks x 3 tiers), one badge per level.
+- Banners (calling cards) unlock by level, prestige and challenges; the Soldier page picks the active one.
+- Camos: five per weapon from headshot kills (10/25/50/75/100), gold at 150. Gold on every weapon in a class
+  (assault rifles, handguns) unlocks that class's mastery camo (Obsidian, Prism). Progress lives in Barracks.
+- Challenges: 100 across combat, weapons, tactics, streaks, matches and career (`challenges.ts`). Each unlocks
+  banner #001–#100. Artwork goes in `public/game/banners/ch-NNN.webp`; flip `BANNER_ART_READY` once it's in.
 
 ## 6. Suggested order
 1. Stairs/second floors + 1 new map

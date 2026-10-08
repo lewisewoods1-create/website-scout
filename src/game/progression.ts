@@ -1,8 +1,8 @@
 /**
- * Ranks 1-85, then Prestige 1-10 (each prestige resets you to level 1).
+ * Ranks 1-75, then Prestige 1-10 (each prestige resets you to level 1).
  * XP needed per level grows linearly; the profile is stored locally for now.
  */
-export const MAX_LEVEL = 85;
+export const MAX_LEVEL = 75;
 export const MAX_PRESTIGE = 10;
 
 export const XP = {
@@ -47,6 +47,12 @@ export interface Profile {
   bestStreak: number;
   /** kills per weapon id, drives attachment unlocks */
   weaponKills: Record<string, number>;
+  /** headshot kills per weapon id, drives camo unlocks */
+  weaponHeads: Record<string, number>;
+  /** challenge counters (see challenges.ts) */
+  stats: Record<string, number>;
+  /** ids of completed challenges */
+  challenges: string[];
   callsign: string;
   banner: string;
   look: SoldierLook;
@@ -56,7 +62,7 @@ const KEY = 'deadpixel.profile.v1';
 
 export function blankProfile(): Profile {
   return {
-    xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {},
+    xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {}, weaponHeads: {}, stats: {}, challenges: [],
     callsign: 'OPERATOR', banner: 'recruit', look: { uniform: 'desert', gear: 'coyote', head: 'nvg' },
   };
 }
@@ -69,6 +75,9 @@ export function loadProfile(): Profile {
     const p = { ...blank, ...(JSON.parse(raw) as Partial<Profile>) };
     p.look = { ...blank.look, ...p.look };
     p.weaponKills = { ...p.weaponKills };
+    p.weaponHeads = { ...p.weaponHeads };
+    p.stats = { ...p.stats };
+    p.challenges = Array.isArray(p.challenges) ? [...p.challenges] : [];
     p.xp = Math.min(p.xp, xpForLevel(MAX_LEVEL));
     return p;
   } catch {
@@ -84,7 +93,7 @@ export function saveProfile(p: Profile) {
   }
 }
 
-/** Add XP, holding at level 85 until the player chooses to prestige. */
+/** Add XP, holding at the max level until the player chooses to prestige. */
 export function grantXp(p: Profile, xp: number) {
   p.xp = Math.min(p.xp + xp, xpForLevel(MAX_LEVEL));
 }

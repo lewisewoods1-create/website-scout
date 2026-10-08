@@ -13,6 +13,8 @@ const CSS = `
 #hud .hit::before, #hud .hit::after { content: ''; position: absolute; left: 12px; top: -2px; width: 2px; height: 30px;
   background: linear-gradient(#fff 0 35%, transparent 35% 65%, #fff 65%); transform: rotate(45deg); }
 #hud .hit::after { transform: rotate(-45deg); }
+#hud .hit.head { width: 34px; height: 34px; margin: -17px; }
+#hud .hit.head::before, #hud .hit.head::after { left: 16px; height: 38px; background: linear-gradient(#ffd23a 0 35%, transparent 35% 65%, #ffd23a 65%); }
 #hud .hit.kill::before, #hud .hit.kill::after { background: linear-gradient(#ff3b2a 0 35%, transparent 35% 65%, #ff3b2a 65%); }
 #hud .ammo { position: absolute; right: 36px; bottom: 28px; text-align: right; }
 #hud .ammo .n { font-size: 52px; line-height: .8; }
@@ -209,8 +211,9 @@ export class Hud {
     r.style.left = `${g}px`;
   }
 
-  hitmarker(kill: boolean) {
+  hitmarker(kill: boolean, head = false) {
     this.hit.classList.toggle('kill', kill);
+    this.hit.classList.toggle('head', head);
     this.hitT = kill ? 0.35 : 0.2;
   }
 
@@ -247,9 +250,20 @@ export class Hud {
     setTimeout(() => d.remove(), 1200);
   }
 
+  private bannerQueue: [string, string, number][] = [];
+  /** Big centre banner; queues behind one that's still showing so unlocks don't overwrite each other. */
   showBanner(title: string, sub: string, secs = 3) {
+    if (this.bannerT > 0.4) {
+      if (this.bannerQueue.length < 6) this.bannerQueue.push([title, sub, secs]);
+      return;
+    }
     this.banner.innerHTML = `<div class="t">${title}</div><div class="s">${sub}</div>`;
     this.bannerT = secs;
+  }
+
+  clearBanners() {
+    this.bannerQueue = [];
+    this.bannerT = 0;
   }
 
   streakInfo(html: string) {
@@ -333,9 +347,18 @@ export class Hud {
     });
   }
 
-  scoreboardTable(show: boolean, html = '') {
-    this.board.style.display = show ? 'flex' : 'none';
-    if (show && this.board.innerHTML !== html) this.board.innerHTML = html;
+  private boardShown = false;
+  private boardKey = '';
+  /** Only touches the DOM when visibility or the board contents (by key) change. */
+  scoreboardTable(show: boolean, key = '', build?: () => string) {
+    if (show !== this.boardShown) {
+      this.boardShown = show;
+      this.board.style.display = show ? 'flex' : 'none';
+    }
+    if (show && build && key !== this.boardKey) {
+      this.boardKey = key;
+      this.board.innerHTML = build();
+    }
   }
 
   endScreen(html: string | null, onContinue?: () => void) {
@@ -351,6 +374,10 @@ export class Hud {
     this.whiteT = Math.max(0, this.whiteT - dt);
     this.white.style.opacity = String(Math.min(1, this.whiteT));
     this.bannerT -= dt;
+    if (this.bannerT <= 0 && this.bannerQueue.length) {
+      const [t, s, secs] = this.bannerQueue.shift()!;
+      this.showBanner(t, s, secs);
+    }
     this.banner.style.opacity = this.bannerT > 0 ? '1' : '0';
     this.vignette.style.opacity = String(Math.min(1, ((100 - health) / 100) * 1.3));
     for (const a of this.dmgArcs) {

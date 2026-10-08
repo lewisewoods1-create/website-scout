@@ -24,10 +24,11 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | `loadout.ts`, `menu.ts` | Create-a-class data and stats; menus, class editor and 3D preview |
 | `hands.ts` | Gloved hands with articulated fingers, attached to the rifle |
 | `soldier.ts` | Fully kitted operator: plate carrier, MOLLE, pouches, helmet + NVG, IK arms |
-| `viewmodel.ts` | First-person animation: sway, bob, ADS, recoil, reload, muzzle flash, brass. `Gun` holds the fire control |
+| `viewmodel.ts` | First-person animation: sway, bob, ADS, recoil, reloads, grenade throws (pin pull, wind-up, release), muzzle flash, brass. `Gun` holds the fire control |
 | `bot.ts` | AI states patrol → engage → hunt; reaction time, strafing, burst fire, accuracy model |
 | `player.ts` | Movement: sprint, crouch, slide, jump, step-up, health regen |
-| `progression.ts`, `unlocks.ts` | Levels 1–85 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
+| `progression.ts`, `unlocks.ts` | Levels 1–75 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
+| `challenges.ts` | 100 challenges over profile stat counters; each pays XP and unlocks its own banner |
 | `cosmetics.ts`, `badges.ts` | Banners, soldier looks, player card; rank/prestige badges from the badge pack generator in `vendor/` |
 | `throwables.ts` | Frag, smoke and stun grenades: bounce physics, fuses, smoke that blocks vision |
 | `hud.ts`, `audio.ts`, `effects.ts`, `textures.ts`, `materials.ts` | HUD, synthesised SFX, low-res FX, procedural textures, PBR materials |

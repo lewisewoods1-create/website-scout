@@ -29,7 +29,7 @@ export function cfgFromLoadout(l: Loadout, slot: 'primary' | 'secondary' = 'prim
       muzzle: pistol && l.secAttach === 'suppressor' ? 'suppressor' : 'none',
       under: 'none',
       mag: pistol && l.secAttach === 'extmag' ? 'ext' : 'std',
-      camo: l.camo,
+      camo: l.secCamo ?? 'none',
     };
   }
   return { weapon: l.weapon, optic: l.optic, muzzle: l.muzzle, under: l.under, mag: l.mag, camo: l.camo };
@@ -47,8 +47,8 @@ function camoMaterial(id: CamoId, base: THREE.MeshStandardMaterial): THREE.MeshS
     mat = new THREE.MeshStandardMaterial({
       map: weaponCamoTex(id),
       roughnessMap: base.roughnessMap,
-      metalness: id === 'gold' ? 1 : 0.35,
-      roughness: id === 'gold' ? 0.3 : 0.55,
+      metalness: { gold: 1, prism: 0.85, obsidian: 0.6 }[id as string] ?? 0.35,
+      roughness: { gold: 0.3, prism: 0.22, obsidian: 0.16 }[id as string] ?? 0.55,
     });
     camoCache.set(id, mat);
   }

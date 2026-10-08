@@ -2,18 +2,21 @@ import * as THREE from 'three';
 import type { Game, MatchConfig, Mode, DifficultyId, Settings } from './game';
 import { DIFFICULTIES, MODES } from './game';
 import {
-  CAMOS, MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS,
-  isUnlocked, lockText, saveClasses, type Choice, type Loadout, type PrimaryId,
+  MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, GOLD_HEADS,
+  camosFor, computeStats, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
+  type Choice, type Loadout, type PrimaryId, type UnlockCtx, type WeaponClassId, type WeaponId,
 } from './loadout';
 import { buildWeapon, cfgFromLoadout } from './weapons';
 import { buildSoldier } from './soldier';
 import { MAX_LEVEL, MAX_PRESTIGE, xpForLevel } from './progression';
 import { ART_MAX_LEVEL, badgeImg, prestigeName, rankInfo } from './badges';
 import { nextUnlock, unlockTrack } from './unlocks';
-import { BANNERS, GEAR, HEADGEAR, UNIFORMS, bannerUnlocked, playerCard } from './cosmetics';
+import { BANNERS, GEAR, HEADGEAR, UNIFORMS, bannerUnlocked, playerCard, type Banner } from './cosmetics';
+import { CATEGORIES, CHALLENGES, isDone, statValue, type ChallengeCat } from './challenges';
 import { MAPS } from './maps';
 
-type Tab = 'mp' | 'bots' | 'cac' | 'soldier' | 'barracks' | 'settings' | 'resume' | 'quit';
+type Page = 'mp' | 'bots' | 'cac' | 'soldier' | 'challenges' | 'barracks' | 'settings';
+type Tab = Page | 'resume' | 'quit';
 
 interface Ctx {
   game: Game;
@@ -26,23 +29,42 @@ interface Ctx {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+const bar = (pct: number) => `<div class="pbar"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div>`;
 
-/** Front-end: main menu, pause menu, create-a-class, soldier, barracks. */
+const DIFF_INFO: Record<DifficultyId, string> = {
+  recruit: 'Slow to react, sprays wide. Learn the maps.',
+  regular: 'A fair fight. Bots flank and use cover.',
+  hardened: 'Quick target pickup, tight groupings.',
+  veteran: 'Near-instant reactions. Every peek is a duel.',
+};
+
+/**
+ * Front-end. The home screen is the nav over the live bot battle; every tab
+ * opens as its own full page (top tabs to hop between pages, Back / Esc to return).
+ */
 export class Menu {
   private root = document.getElementById('menu') as HTMLDivElement;
   private ctx: Ctx;
   private context: 'main' | 'pause' = 'main';
-  private tab: Tab = 'bots';
+  /** null = home screen */
+  private page: Page | null = null;
   private mode: Mode = 'tdm';
   private difficulty: DifficultyId = 'regular';
   private mapId = 'random';
   private openSlot: string | null = null;
   private editIndex = 0;
   private prestigeArmed = false;
+  private chFilter: ChallengeCat | 'all' | 'open' = 'all';
   private preview: Preview | null = null;
 
   constructor(ctx: Ctx) {
     this.ctx = ctx;
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'Escape' || !this.isOpen || !this.page) return;
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      e.preventDefault();
+      this.back();
+    });
   }
 
   get isOpen() {
@@ -51,7 +73,8 @@ export class Menu {
 
   open(context: 'main' | 'pause') {
     this.context = context;
-    this.tab = context === 'pause' ? 'resume' : this.tab === 'resume' ? 'bots' : this.tab;
+    this.page = null;
+    this.ctx.game.syncChallenges();
     this.root.classList.add('open');
     this.render(true);
   }
@@ -65,26 +88,50 @@ export class Menu {
     return this.ctx.game.profileSummary().level;
   }
 
-  private ctxFor(kills: number) {
-    return { level: this.level(), kills, all: this.ctx.settings.unlockAll };
+  private ctxFor(u: Partial<UnlockCtx> = {}): UnlockCtx {
+    return { level: this.level(), kills: 0, all: this.ctx.settings.unlockAll, ...u };
   }
 
-  private render(animateNav = false) {
+  private weaponCtx(w: WeaponId): Partial<UnlockCtx> {
+    const p = this.ctx.game.profileData;
+    return { kills: p.weaponKills[w] ?? 0, heads: p.weaponHeads[w] ?? 0, allHeads: p.weaponHeads };
+  }
+
+  private navItems(): [Tab, string, string][] {
+    const done = this.ctx.game.profileData.challenges.length;
+    return this.context === 'pause'
+      ? [['resume', 'RESUME', ''], ['cac', 'CREATE A CLASS', 'next spawn'], ['challenges', 'CHALLENGES', `${done}/100`], ['settings', 'SETTINGS', ''], ['quit', 'QUIT MATCH', '']]
+      : [
+          ['mp', 'MULTIPLAYER', 'offline'], ['bots', 'BOT MATCH', ''], ['cac', 'CREATE A CLASS', ''], ['soldier', 'SOLDIER', ''],
+          ['challenges', 'CHALLENGES', `${done}/100`], ['barracks', 'BARRACKS', ''], ['settings', 'SETTINGS', ''],
+        ];
+  }
+
+  private render(animate = false) {
+    this.root.classList.toggle('static', !animate);
+    this.root.classList.toggle('home', !this.page);
+    this.root.classList.toggle('paged', !!this.page);
+    this.root.innerHTML = this.page ? this.pageShell(this.page) : this.homeHtml(animate);
+    this.root.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => {
+      b.addEventListener('click', () => this.select(b.dataset.tab as Tab));
+      b.addEventListener('mouseenter', () => this.ctx.game.sfx.uiMove());
+    });
+    this.root.querySelector('[data-back]')?.addEventListener('click', () => this.back());
+    this.bindPanel();
+  }
+
+  private homeHtml(animate: boolean) {
     const pause = this.context === 'pause';
-    this.root.classList.toggle('static', !animateNav);
-    const items: [Tab, string, string][] = pause
-      ? [['resume', 'RESUME', ''], ['cac', 'CREATE A CLASS', 'next spawn'], ['settings', 'SETTINGS', ''], ['quit', 'QUIT MATCH', '']]
-      : [['mp', 'MULTIPLAYER', 'offline'], ['bots', 'BOT MATCH', ''], ['cac', 'CREATE A CLASS', ''], ['soldier', 'SOLDIER', ''], ['barracks', 'BARRACKS', ''], ['settings', 'SETTINGS', '']];
     const title = 'DEAD PIXEL'
       .split('')
-      .map((ch, i) => `<span style="animation-delay:${animateNav ? i * 0.05 : 0}s">${ch === ' ' ? '&nbsp;' : ch}</span>`)
+      .map((ch, i) => `<span style="animation-delay:${animate ? i * 0.05 : 0}s">${ch === ' ' ? '&nbsp;' : ch}</span>`)
       .join('');
     const p = this.ctx.game.profileSummary();
     const base = xpForLevel(p.level);
     const need = p.level >= MAX_LEVEL ? 1 : xpForLevel(p.level + 1) - base;
     const nu = nextUnlock(p.level);
     const ready = this.ctx.game.prestigeReady;
-    this.root.innerHTML = `
+    return `
       <div class="left">
         <div class="rank top">
           ${playerCard(this.ctx.game.profileData)}
@@ -92,94 +139,162 @@ export class Menu {
         </div>
         <h1 class="title glitch">${title}</h1>
         <div class="tag">${pause ? 'PAUSED' : 'PS1 WORLD · MODERN KIT'}</div>
-        <nav>${items
-          .map(([id, label, small], i) => `<button type="button" data-tab="${id}" class="${this.tab === id ? 'on' : ''}" style="animation-delay:${animateNav ? 0.35 + i * 0.07 : 0}s">${label}${small ? `<small>${small}</small>` : ''}</button>`)
+        <nav>${this.navItems()
+          .map(([id, label, small], i) => `<button type="button" data-tab="${id}" style="animation-delay:${animate ? 0.35 + i * 0.07 : 0}s">${label}${small ? `<small>${small}</small>` : ''}</button>`)
           .join('')}</nav>
         ${nu ? `<div class="rk-next bottom">NEXT UNLOCK · LVL ${nu[0]}<br><b>${nu[1]}</b></div>` : ''}
       </div>
-      <div class="panel" id="panel">${this.panelHtml()}</div>`;
-    this.root.querySelectorAll<HTMLButtonElement>('nav button').forEach((b) => {
-      b.addEventListener('click', () => this.select(b.dataset.tab as Tab));
-      b.addEventListener('mouseenter', () => this.ctx.game.sfx.uiMove());
-    });
-    this.bindPanel();
+      ${pause ? '' : `<aside class="home-side">${this.nearlyThere()}</aside>`}`;
+  }
+
+  /** Home teaser: the three open challenges closest to done. */
+  private nearlyThere() {
+    const p = this.ctx.game.profileData;
+    const lvl = this.level();
+    const open = CHALLENGES.filter((c) => !isDone(p, c))
+      .map((c) => ({ c, k: statValue(p, c.stat, lvl) / c.target }))
+      .sort((a, b) => b.k - a.k)
+      .slice(0, 3);
+    if (!open.length) return '';
+    return `<div class="label" style="margin-top:0">NEARLY THERE</div>${open
+      .map(({ c }) => {
+        const v = Math.min(c.target, statValue(p, c.stat, lvl));
+        return `<button type="button" class="mini-ch" data-tab="challenges"><b>${c.name}</b><span>${c.desc}</span>${bar((v / c.target) * 100)}<em>${v} / ${c.target}</em></button>`;
+      })
+      .join('')}`;
+  }
+
+  private pageShell(page: Page) {
+    const tabs = this.navItems().filter(([id]) => id !== 'resume' && id !== 'quit');
+    return `<div class="page">
+      <header class="ph">
+        <button type="button" class="back" data-back aria-label="Back">‹ BACK <small>ESC</small></button>
+        <nav class="ptabs">${tabs.map(([id, label]) => `<button type="button" data-tab="${id}" class="${page === id ? 'on' : ''}">${label}</button>`).join('')}</nav>
+        <div class="ph-card">${playerCard(this.ctx.game.profileData, { compact: true })}</div>
+      </header>
+      <main class="pbody" id="panel"><div class="pinner">${this.pageHtml(page)}</div></main>
+    </div>`;
   }
 
   private select(t: Tab) {
     this.ctx.game.sfx.uiSelect();
     if (t === 'resume') return this.ctx.resume();
     if (t === 'quit') return this.ctx.quit();
-    this.tab = t;
+    this.page = t;
     this.openSlot = null;
     this.prestigeArmed = false;
-    this.render();
+    this.render(true);
   }
 
-  // ------------------------------------------------------------------ panels
+  private back() {
+    this.ctx.game.sfx.uiMove();
+    this.page = null;
+    this.preview?.stop();
+    this.render(true);
+  }
 
-  private panelHtml(): string {
-    switch (this.tab) {
+  // ------------------------------------------------------------------ pages
+
+  private pageHtml(page: Page): string {
+    switch (page) {
       case 'mp':
-        return `<h2>MULTIPLAYER</h2><div class="sub">Online play arrives in Phase 2: matchmaking, parties, 6v6 on dedicated servers.</div>
-          ${['TEAM DEATHMATCH · 6v6', 'FREE-FOR-ALL · 12 PLAYERS', 'DOMINATION · 6v6', 'SEARCH & DESTROY · 6v6', 'GROUND WAR · 9v9']
-            .map((n) => `<div class="playlist"><span>${n}</span><span class="chip">OFFLINE</span></div>`)
-            .join('')}
-          <div class="row"><button class="go" type="button" disabled>FIND MATCH</button>
-          <button class="go ghost" type="button" data-act="tobots">PLAY BOTS INSTEAD</button></div>`;
-      case 'bots': {
-        const modes = (Object.keys(MODES) as Mode[])
-          .map((m) => `<button type="button" class="card ${this.mode === m ? 'on' : ''}" data-mode="${m}"><b>${MODES[m].label}</b><span>${MODES[m].desc}</span><span>${MODES[m].minutes} MIN LIMIT</span></button>`)
-          .join('');
-        const diffs = (Object.keys(DIFFICULTIES) as DifficultyId[])
-          .map((d) => `<button type="button" class="card ${this.difficulty === d ? 'on' : ''}" data-diff="${d}"><b>${DIFFICULTIES[d].label}</b></button>`)
-          .join('');
-        return `<h2>BOT MATCH</h2><div class="sub">Bots fight each other and you.</div>
-          <div class="label">GAME MODE</div><div class="grid2">${modes}</div>
-          <div class="label">BOT DIFFICULTY</div><div class="row">${diffs}</div>
-          <div class="label">MAP</div><div class="maps">${this.mapCards()}</div>
-          <button class="go" type="button" data-act="start">START MATCH</button>
-          <div class="sub" style="margin-top:10px">You pick your class when the match loads.</div>`;
-      }
+        return this.mpHtml();
+      case 'bots':
+        return this.botsHtml();
       case 'cac':
         return this.cacHtml();
       case 'soldier':
         return this.soldierHtml();
+      case 'challenges':
+        return this.challengesHtml();
       case 'barracks':
         return this.barracksHtml();
       case 'settings':
         return this.settingsHtml();
-      default:
-        return '';
     }
+  }
+
+  private mpHtml() {
+    const lists: [string, string][] = [
+      ['TEAM DEATHMATCH · 6v6', 'Two squads. Most kills wins.'],
+      ['FREE-FOR-ALL · 12 PLAYERS', 'Everyone for themselves.'],
+      ['DOMINATION · 6v6', 'Hold three flags to tick up score.'],
+      ['SEARCH & DESTROY · 6v6', 'One life per round. Plant or defuse.'],
+      ['GROUND WAR · 9v9', 'Bigger lobbies on the largest maps.'],
+    ];
+    return `<h2>MULTIPLAYER</h2><div class="sub">Online play arrives in Phase 2. Until then, bot matches earn the same XP, unlocks, camos and challenges.</div>
+      <div class="cols2">
+        <div><div class="label">PLAYLISTS</div>${lists.map(([n, d]) => `<div class="playlist"><span>${n}<small>${d}</small></span><span class="chip">OFFLINE</span></div>`).join('')}
+          <div class="row"><button class="go" type="button" disabled>FIND MATCH</button><button class="go ghost" type="button" data-act="tobots">PLAY BOTS INSTEAD</button></div></div>
+        <div><div class="label">WHAT'S COMING</div>
+          <div class="info-list">
+            <div><b>DEDICATED SERVERS</b><span>30Hz authoritative servers in EU-West and US-East first.</span></div>
+            <div><b>PARTIES</b><span>Squad up with friends and queue together.</span></div>
+            <div><b>BOT BACKFILL</b><span>Lobbies are always full: bots hold slots until real players join.</span></div>
+            <div><b>CROSS-SAVE</b><span>Your level, prestige, camos and banners carry over from bot play.</span></div>
+          </div></div>
+      </div>`;
+  }
+
+  private botsHtml() {
+    const modes = (Object.keys(MODES) as Mode[])
+      .map((m) => `<button type="button" class="card ${this.mode === m ? 'on' : ''}" data-mode="${m}"><b>${MODES[m].label}</b><span>${MODES[m].desc}</span><span>FIRST TO ${MODES[m].scoreLimit} · ${MODES[m].minutes} MIN</span></button>`)
+      .join('');
+    const diffs = (Object.keys(DIFFICULTIES) as DifficultyId[])
+      .map((d) => {
+        const D = DIFFICULTIES[d];
+        return `<button type="button" class="card ${this.difficulty === d ? 'on' : ''}" data-diff="${d}"><b>${D.label}</b><span>${DIFF_INFO[d]}</span>
+          <div class="stat"><span>REACTION</span>${bar((1 / D.react) * 55)}</div><div class="stat"><span>AIM</span>${bar(D.accuracy * 75)}</div><div class="stat"><span>DAMAGE</span>${bar(D.damage * 75)}</div></button>`;
+      })
+      .join('');
+    const sel = MAPS.find((m) => m.id === this.mapId);
+    const p = this.ctx.game.profileData;
+    return `<h2>BOT MATCH</h2><div class="sub">Bots fight each other and you. Everything you earn here counts.</div>
+      <div class="cols2 wide-right">
+        <div>
+          <div class="label">GAME MODE</div><div class="grid2">${modes}</div>
+          <div class="label">BOT DIFFICULTY</div><div class="grid2 diffs">${diffs}</div>
+        </div>
+        <div>
+          <div class="label">MAP</div>
+          <div class="map-hero" style="background:${sel ? sel.swatch : 'repeating-linear-gradient(45deg,#2a2226 0 8px,#3a3034 8px 16px)'}">
+            <div><b>${sel ? sel.name : 'RANDOM'}</b><span>${sel ? sel.desc : 'A different map from the pool each match.'}</span>
+            ${sel ? `<em>${p.stats[`win_${sel.id}`] ?? 0} WINS HERE</em>` : ''}</div></div>
+          <div class="maps">${this.mapCards()}</div>
+          <button class="go" type="button" data-act="start">START MATCH</button>
+          <div class="sub" style="margin-top:10px">You pick your class when the match loads.</div>
+        </div>
+      </div>`;
   }
 
   private settingsHtml() {
     const s = this.ctx.settings;
-    return `<h2>SETTINGS</h2><div class="settings">
+    return `<h2>SETTINGS</h2><div class="cols2"><div><div class="label">GAME</div><div class="settings">
       <label for="s-sens">SENSITIVITY</label><input id="s-sens" type="range" min="0.2" max="3" step="0.05" value="${s.sensitivity}"><span id="s-sens-v">${s.sensitivity.toFixed(2)}</span>
       <label for="s-fov">FIELD OF VIEW</label><input id="s-fov" type="range" min="65" max="100" step="1" value="${s.fov}"><span id="s-fov-v">${s.fov}°</span>
       <label for="s-vol">VOLUME</label><input id="s-vol" type="range" min="0" max="1" step="0.05" value="${s.volume}"><span id="s-vol-v">${Math.round(s.volume * 100)}%</span>
       <label for="s-res">WORLD RESOLUTION</label><select id="s-res">${[240, 360, 480, 720].map((r) => `<option value="${r}" ${s.lowHeight === r ? 'selected' : ''}>${r}p${r === 240 ? ' (true PS1)' : r === 480 ? ' (default)' : ''}</option>`).join('')}</select><span></span>
       <label for="s-dither">DITHERING</label><input id="s-dither" type="checkbox" ${s.dither ? 'checked' : ''}><span></span>
       <label for="s-unlock">UNLOCK ALL (TESTING)</label><input id="s-unlock" type="checkbox" ${s.unlockAll ? 'checked' : ''}><span></span>
-    </div>
-    <div class="keys"><b>WASD</b> move · <b>MOUSE</b> aim · <b>LMB</b> fire · <b>RMB</b> aim down sights · <b>SHIFT</b> sprint · <b>SPACE</b> jump ·
-      <b>C</b> crouch / slide · <b>R</b> reload · <b>1 / 2 / WHEEL</b> switch weapon · <b>G</b> frag · <b>Q</b> tactical · <b>4</b> killstreak ·
-      <b>TAB</b> scoreboard · <b>ESC</b> pause</div>`;
+    </div></div>
+    <div><div class="label">CONTROLS</div><div class="keys grid-keys">
+      <span><b>WASD</b> move</span><span><b>MOUSE</b> aim</span><span><b>LMB</b> fire</span><span><b>RMB</b> aim down sights</span>
+      <span><b>SHIFT</b> sprint</span><span><b>SPACE</b> jump</span><span><b>C</b> crouch / slide</span><span><b>R</b> reload</span>
+      <span><b>1 / 2 / WHEEL</b> switch weapon</span><span><b>G</b> frag</span><span><b>Q</b> tactical</span><span><b>4</b> killstreak</span>
+      <span><b>TAB</b> scoreboard</span><span><b>ESC</b> pause / back</span></div></div></div>`;
   }
 
   private mapCards() {
     const cards = MAPS.map(
       (m) => `<button type="button" class="card map ${this.mapId === m.id ? 'on' : ''}" data-map="${m.id}">
-        <i class="thumb" style="background:${m.swatch}"></i><b>${m.name}</b><span>${m.desc}</span></button>`,
+        <i class="thumb" style="background:${m.swatch}"></i><b>${m.name}</b></button>`,
     );
     cards.push(`<button type="button" class="card map ${this.mapId === 'random' ? 'on' : ''}" data-map="random">
-      <i class="thumb" style="background:repeating-linear-gradient(45deg,#2a2226 0 8px,#3a3034 8px 16px)"></i><b>RANDOM</b><span>Rotate through the pool.</span></button>`);
+      <i class="thumb" style="background:repeating-linear-gradient(45deg,#2a2226 0 8px,#3a3034 8px 16px)"></i><b>RANDOM</b></button>`);
     return cards.join('');
   }
 
-  /** A list row that expands to show its options. */
-  private slotRow(key: string, label: string, opts: Choice[], current: string, kills: number, weaponName: string, attr = 'set', note = '') {
+  private slotRow(key: string, label: string, opts: Choice[], current: string, u: Partial<UnlockCtx>, weaponName: string, attr = 'set', note = '') {
     const cur = opts.find((o) => o.id === current) ?? opts[0];
     const open = this.openSlot === key;
     // always reserve the swatch column so every row's value lines up
@@ -187,13 +302,33 @@ export class Menu {
     const choices = open
       ? `<div class="choices">${note ? `<div class="sub" style="grid-column:1/-1">${note}</div>` : ''}${opts
           .map((o) => {
-            const locked = !isUnlocked(o, this.ctxFor(kills));
+            const locked = !isUnlocked(o, this.ctxFor(u));
+            const prog = locked && o.heads ? `<span class="prog">${Math.min(u.heads ?? 0, o.heads)} / ${o.heads}</span>${bar(((u.heads ?? 0) / o.heads) * 100)}` : '';
             return `<button type="button" class="card ${current === o.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-${attr}="${key}" data-val="${o.id}">
-              <b>${o.swatch ? `<i class="sw" style="background:${o.swatch}"></i>` : ''}${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${locked ? `<span class="lock">UNLOCKS · ${lockText(o, weaponName)}</span>` : ''}</button>`;
+              <b>${o.swatch ? `<i class="sw" style="background:${o.swatch}"></i>` : ''}${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${locked ? `<span class="lock">UNLOCKS · ${lockText(o, weaponName)}</span>${prog}` : ''}</button>`;
           })
           .join('')}</div>`
       : '';
     return `<button type="button" class="slot ${open ? 'open' : ''}" data-slot="${key}"><span class="sl">${label}</span><span class="sv">${sw}${cur.name}</span><span class="chev">${open ? '−' : '+'}</span></button>${choices}`;
+  }
+
+  /** Numbers behind the bars: what the current attachments actually do. */
+  private statSheet(l: Loadout, slot: 'primary' | 'secondary') {
+    const st = computeStats(l, slot);
+    const w = slot === 'primary' ? l.weapon : l.secondary;
+    const p = this.ctx.game.profileData;
+    const heads = p.weaponHeads[w] ?? 0;
+    const next = CAMOS.find((c) => (c.heads ?? 0) > heads);
+    const rows: [string, string][] = [
+      ['DAMAGE', `${Math.round(st.damageAt(0))} – ${Math.round(st.damageAt(999))}`],
+      ['HEADSHOT', `${Math.round(st.damageAt(0) * 2)}`],
+      ['FIRE RATE', `${st.rpm} RPM${st.auto ? '' : ' · SEMI'}`],
+      ['MAGAZINE', `${st.mag} + ${st.reserve}`],
+      ['RELOAD', `${st.reload.toFixed(1)}s / ${st.reloadEmpty.toFixed(1)}s empty`],
+      ['KILLS', `${p.weaponKills[w] ?? 0}`],
+      ['HEADSHOT KILLS', `${heads}${next ? ` · ${next.name} AT ${next.heads}` : ' · GOLD'}`],
+    ];
+    return `<div class="sheet">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>`;
   }
 
   private cacHtml() {
@@ -203,93 +338,182 @@ export class Menu {
     const sec = WEAPONS[c.secondary];
     const primKills = pk[c.weapon] ?? 0;
     const secKills = pk[c.secondary] ?? 0;
-    const showSecondary = this.openSlot === 'secondary' || this.openSlot === 'secAttach';
+    const showSecondary = ['secondary', 'secAttach', 'secCamo'].includes(this.openSlot ?? '');
     const w = showSecondary ? sec : prim;
     const bars = Object.entries(w.bars)
       .map(([k, v]) => `<div class="stat"><span>${k.toUpperCase()}</span><div class="b"><i style="width:${v * 10}%"></i></div></div>`)
       .join('');
     const primaries: Choice[] = (['kr4', 'vk47'] as PrimaryId[]).map((id) => ({ id, name: WEAPONS[id].name, desc: WEAPONS[id].blurb }));
+    const pu = this.weaponCtx(c.weapon);
+    const su = this.weaponCtx(c.secondary);
     const rows = [
       `<div class="group-label">PRIMARY · ${primKills} KILLS</div>`,
-      this.slotRow('weapon', 'WEAPON', primaries, c.weapon, primKills, prim.name),
-      this.slotRow('optic', 'OPTIC', OPTICS, c.optic, primKills, prim.name),
-      this.slotRow('muzzle', 'MUZZLE', MUZZLES, c.muzzle, primKills, prim.name),
-      this.slotRow('under', 'UNDERBARREL', UNDERS, c.under, primKills, prim.name),
-      this.slotRow('mag', 'MAGAZINE', MAGS, c.mag, primKills, prim.name),
-      this.slotRow('camo', 'CAMO', CAMOS, c.camo, primKills, prim.name),
+      this.slotRow('weapon', 'WEAPON', primaries, c.weapon, {}, prim.name),
+      this.slotRow('optic', 'OPTIC', OPTICS, c.optic, pu, prim.name),
+      this.slotRow('muzzle', 'MUZZLE', MUZZLES, c.muzzle, pu, prim.name),
+      this.slotRow('under', 'UNDERBARREL', UNDERS, c.under, pu, prim.name),
+      this.slotRow('mag', 'MAGAZINE', MAGS, c.mag, pu, prim.name),
+      this.slotRow('camo', 'CAMO', camosFor(c.weapon), c.camo, pu, prim.name),
       `<div class="group-label">SECONDARY · ${secKills} KILLS</div>`,
-      this.slotRow('secondary', 'SIDEARM', SECONDARIES, c.secondary, secKills, sec.name),
-      this.slotRow('secAttach', 'ATTACHMENT', SEC_ATTACH, c.secAttach, secKills, sec.name, 'set', c.secondary === 'r357' ? 'The revolver takes no attachments.' : ''),
+      this.slotRow('secondary', 'SIDEARM', SECONDARIES, c.secondary, {}, sec.name),
+      this.slotRow('secAttach', 'ATTACHMENT', SEC_ATTACH, c.secAttach, su, sec.name, 'set', c.secondary === 'r357' ? 'The revolver takes no attachments.' : ''),
+      this.slotRow('secCamo', 'CAMO', camosFor(c.secondary), c.secCamo, su, sec.name),
       `<div class="group-label">EQUIPMENT & PERKS</div>`,
-      this.slotRow('tactical', 'TACTICAL', TACTICALS, c.tactical, 0, ''),
-      this.slotRow('perk1', 'PERK 1', PERKS1, c.perk1, 0, ''),
-      this.slotRow('perk2', 'PERK 2', PERKS2, c.perk2, 0, ''),
-      this.slotRow('perk3', 'PERK 3', PERKS3, c.perk3, 0, ''),
+      this.slotRow('tactical', 'TACTICAL', TACTICALS, c.tactical, {}, ''),
+      this.slotRow('perk1', 'PERK 1', PERKS1, c.perk1, {}, ''),
+      this.slotRow('perk2', 'PERK 2', PERKS2, c.perk2, {}, ''),
+      this.slotRow('perk3', 'PERK 3', PERKS3, c.perk3, {}, ''),
     ].join('');
-    return `<h2>CREATE A CLASS</h2><div class="sub">${this.context === 'pause' ? 'Changes apply on your next spawn.' : 'Pick a slot to change it. Attachments unlock with kills on each gun.'}</div>
-      <div class="row">${this.ctx.classes
-        .map((cl, i) => `<button type="button" class="card ${this.editIndex === i ? 'on' : ''}" data-edit="${i}"><b>${esc(cl.name)}</b><span>${WEAPONS[cl.weapon].name}</span></button>`)
-        .join('')}
-        <input class="name" id="cname" maxlength="14" aria-label="Class name" value="${esc(c.name)}"></div>
-      <div class="studio"><div id="preview-slot" data-kind="${showSecondary ? 'secondary' : 'primary'}"></div><div class="studio-info"><b>${w.name}</b>${bars}</div></div>
-      <div class="slots">${rows}</div>`;
+    const classList = this.ctx.classes
+      .map((cl, i) => `<button type="button" class="card ${this.editIndex === i ? 'on' : ''}" data-edit="${i}"><b>${esc(cl.name)}</b><span>${WEAPONS[cl.weapon].name}</span><span>${WEAPONS[cl.secondary].name} · ${TACTICALS.find((t) => t.id === cl.tactical)?.name ?? ''}</span></button>`)
+      .join('');
+    return `<h2>CREATE A CLASS</h2><div class="sub">${this.context === 'pause' ? 'Changes apply on your next spawn.' : 'Attachments unlock with kills on each gun. Camos unlock with headshot kills.'}</div>
+      <div class="cac-layout">
+        <div class="cac-classes"><div class="label" style="margin-top:0">CLASSES</div>${classList}
+          <div class="label">NAME</div><input class="name" id="cname" maxlength="14" aria-label="Class name" value="${esc(c.name)}"></div>
+        <div class="cac-view">
+          <div class="studio" style="margin-top:0"><div id="preview-slot" data-kind="${showSecondary ? 'secondary' : 'primary'}"></div><div class="studio-info"><b>${w.name}</b>${bars}</div></div>
+          <div class="label">${showSecondary ? 'SIDEARM' : 'PRIMARY'} STATS</div>${this.statSheet(c, showSecondary ? 'secondary' : 'primary')}
+        </div>
+        <div class="slots">${rows}</div>
+      </div>`;
+  }
+
+  private bannerCard(b: Banner, locked: boolean, on: boolean, lockLabel: string) {
+    return `<button type="button" class="bcard ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}">
+      ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}<span class="bname">${b.name}</span>${locked ? `<span class="block">${lockLabel}</span>` : ''}</button>`;
   }
 
   private soldierHtml() {
     const p = this.ctx.game.profileData;
     const lvl = this.level();
-    const opt = (key: 'uniform' | 'gear' | 'head', label: string, list: Choice[]) =>
-      this.slotRow(key, label, list, p.look[key], 0, '', 'look');
-    const banners = BANNERS.map((b) => {
-      const locked = !bannerUnlocked(b, lvl, p.prestige, this.ctx.settings.unlockAll);
-      return `<button type="button" class="bcard ${p.banner === b.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}">
-        ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}<span class="bname">${b.name}</span>${locked ? `<span class="block">${b.prestige ? `PRESTIGE ${b.prestige}` : `LVL ${b.level}`}</span>` : ''}</button>`;
-    }).join('');
-    return `<h2>SOLDIER</h2><div class="sub">Your operator and calling card. Full customisation (faces, gear sets, emblems) is still to come.</div>
+    const all = this.ctx.settings.unlockAll;
+    const opt = (key: 'uniform' | 'gear' | 'head', label: string, list: Choice[]) => this.slotRow(key, label, list, p.look[key], {}, '', 'look');
+    const group = (list: Banner[], lockLabel: (b: Banner) => string) =>
+      list.map((b) => this.bannerCard(b, !bannerUnlocked(b, lvl, p.prestige, all, p.challenges), p.banner === b.id, lockLabel(b))).join('');
+    const rankB = BANNERS.filter((b) => !b.prestige && !b.challenge);
+    const presB = BANNERS.filter((b) => b.prestige);
+    const chB = BANNERS.filter((b) => b.challenge);
+    const chGot = chB.filter((b) => bannerUnlocked(b, lvl, p.prestige, all, p.challenges)).length;
+    return `<h2>SOLDIER</h2><div class="sub">Your operator and calling card. Faces and gear sets are still to come.</div>
       <div class="soldier-wrap"><div class="studio tall"><div id="preview-slot" data-kind="soldier"></div></div>
         <div class="soldier-side">${playerCard(p)}
           <div class="label">CALLSIGN</div><input class="name" id="callsign" maxlength="16" aria-label="Callsign" value="${esc(p.callsign)}">
+          <div class="label">LOOK</div>
           <div class="slots">${opt('uniform', 'UNIFORM', UNIFORMS)}${opt('gear', 'GEAR', GEAR)}${opt('head', 'HEADGEAR', HEADGEAR)}</div>
         </div></div>
-      <div class="label">BANNERS</div><div class="banners">${banners}</div>`;
+      <div class="label">RANK BANNERS</div><div class="banners">${group(rankB, (b) => `LVL ${b.level ?? 1}`)}</div>
+      <div class="label">PRESTIGE BANNERS</div><div class="banners">${group(presB, (b) => `PRESTIGE ${b.prestige}`)}</div>
+      <div class="label">CHALLENGE BANNERS · ${chGot} / ${chB.length}</div><div class="banners">${group(chB, () => 'CHALLENGE')}</div>`;
+  }
+
+  private challengesHtml() {
+    const p = this.ctx.game.profileData;
+    const lvl = this.level();
+    const doneN = p.challenges.length;
+    const cats = Object.keys(CATEGORIES) as ChallengeCat[];
+    const chips = (['all', 'open', ...cats] as const)
+      .map((f) => {
+        const label = f === 'all' ? 'ALL' : f === 'open' ? 'IN PROGRESS' : CATEGORIES[f].name;
+        const n = f === 'all' || f === 'open' ? '' : ` ${CHALLENGES.filter((c) => c.cat === f && isDone(p, c)).length}/${CHALLENGES.filter((c) => c.cat === f).length}`;
+        return `<button type="button" class="fchip ${this.chFilter === f ? 'on' : ''}" data-chf="${f}">${label}${n}</button>`;
+      })
+      .join('');
+    const list = CHALLENGES.filter((c) => (this.chFilter === 'all' ? true : this.chFilter === 'open' ? !isDone(p, c) : c.cat === this.chFilter));
+    const cards = list
+      .map((c) => {
+        const done = isDone(p, c);
+        const v = Math.min(c.target, statValue(p, c.stat, lvl));
+        const b = BANNERS.find((x) => x.challenge === c.id)!;
+        return `<div class="chcard ${done ? 'done' : ''}">
+          <div class="chban" style="background:${b.bg}">${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}<span class="chn">#${String(c.n).padStart(3, '0')}</span>${done ? '<span class="chk">✓</span>' : ''}</div>
+          <div class="chtxt"><b>${c.name}</b><span>${c.desc}</span>${bar((v / c.target) * 100)}
+            <div class="chfoot"><em>${done ? 'COMPLETE' : `${v.toLocaleString()} / ${c.target.toLocaleString()}`}</em><em>+${c.xp} XP · BANNER</em></div></div></div>`;
+      })
+      .join('');
+    return `<h2>CHALLENGES</h2><div class="sub">${doneN} of ${CHALLENGES.length} complete. Every challenge pays XP and unlocks its own banner for your calling card.</div>
+      ${bar(doneN)}
+      <div class="fchips">${chips}</div>
+      <div class="chgrid">${cards || '<div class="sub">Nothing here: every challenge in this list is complete.</div>'}</div>`;
+  }
+
+  private camoTrack() {
+    const p = this.ctx.game.profileData;
+    const all = this.ctx.settings.unlockAll;
+    const cls = Object.entries(WEAPON_CLASSES) as [WeaponClassId, (typeof WEAPON_CLASSES)[WeaponClassId]][];
+    return cls
+      .map(([id, wc]) => {
+        const mastered = all || hasMastery(p.weaponHeads, id);
+        const golds = wc.weapons.filter((w) => hasGold(p.weaponHeads, w)).length;
+        const rows = wc.weapons
+          .map((w) => {
+            const h = p.weaponHeads[w] ?? 0;
+            const swatches = CAMOS.slice(1)
+              .map((c) => `<i class="sw ${h >= (c.heads ?? 0) || all ? '' : 'off'}" style="background:${c.swatch}" title="${c.name} · ${c.heads} headshot kills"></i>`)
+              .join('');
+            return `<div class="camo-row"><b>${WEAPONS[w].name}</b><span class="sws">${swatches}</span><span class="hk">${Math.min(h, GOLD_HEADS)} / ${GOLD_HEADS}</span>${bar((h / GOLD_HEADS) * 100)}</div>`;
+          })
+          .join('');
+        return `<div class="mastery ${mastered ? 'got' : ''}">
+          <div class="mh"><i class="sw big" style="background:${wc.camo.swatch}"></i><div><b>${wc.name} · ${wc.camo.name}</b>
+            <span>${mastered ? 'MASTERY CAMO UNLOCKED for every weapon in this class.' : `Gold on every ${wc.name.toLowerCase().replace(/s$/, '')} unlocks it · ${golds} / ${wc.weapons.length} GOLD`}</span></div></div>
+          ${rows}</div>`;
+      })
+      .join('');
   }
 
   private barracksHtml() {
     const p = this.ctx.game.profileSummary();
     const ready = this.ctx.game.prestigeReady;
     const track = [...unlockTrack().entries()]
-      .map(([l, items]) => `<div class="playlist"><span>LVL ${l} · ${items.join(' · ')}</span><span class="chip ${p.level >= l ? 'ok' : ''}">${p.level >= l ? 'UNLOCKED' : 'LOCKED'}</span></div>`)
+      .map(([l, items]) => `<div class="playlist"><span>LVL ${l} · ${items.join(' · ')}</span><span class="chip ${p.level >= l || p.prestige > 0 ? 'ok' : ''}">${p.level >= l ? 'UNLOCKED' : 'LOCKED'}</span></div>`)
       .join('');
     const emblems = Array.from({ length: MAX_PRESTIGE }, (_, i) => `<div class="emb ${p.prestige >= i + 1 ? 'got' : ''}">${badgeImg(MAX_LEVEL, i + 1, 64)}<span>P${i + 1} · ${prestigeName(i + 1).toUpperCase()}</span></div>`).join('');
     const ladder = Array.from({ length: ART_MAX_LEVEL / 3 }, (_, i) => {
       const lvl = i * 3 + 1;
       return `<div class="emb ${p.level >= lvl || p.prestige > 0 ? 'got' : ''}">${badgeImg(lvl + 2, 0, 56)}<span>${lvl}–${lvl + 2} · ${rankInfo(lvl).abbr}</span></div>`;
     }).join('');
-    const wk = Object.entries(WEAPONS)
-      .map(([id, w]) => `<div class="card"><b>${p.weaponKills[id] ?? 0}</b><span>${w.name}</span></div>`)
+    const s = p.stats;
+    const kd = p.deaths ? (p.kills / p.deaths).toFixed(2) : String(p.kills);
+    const matches = s.matches ?? 0;
+    const record: [string, string | number][] = [
+      ['KILLS', p.kills], ['DEATHS', p.deaths], ['K/D', kd], ['HEADSHOTS', p.headshots],
+      ['HEADSHOT %', p.kills ? `${Math.round((p.headshots / p.kills) * 100)}%` : '0%'], ['BEST STREAK', p.bestStreak],
+      ['MATCHES', matches], ['WINS', s.wins ?? 0], ['WIN %', matches ? `${Math.round(((s.wins ?? 0) / matches) * 100)}%` : '0%'],
+      ['BEST MATCH', `${s.best_match_kills ?? 0} KILLS`], ['LONGSHOTS', s.longshots ?? 0], ['FRAG KILLS', s.frag_kills ?? 0],
+    ];
+    const wk = (Object.keys(WEAPONS) as WeaponId[])
+      .map((id) => `<div class="card"><b>${p.weaponKills[id] ?? 0}</b><span>${WEAPONS[id].name} · ${p.weaponHeads[id] ?? 0} HEADSHOT KILLS</span></div>`)
       .join('');
     return `<h2>BARRACKS</h2>
-      <div class="rankhead">${badgeImg(p.level, p.prestige, 96)}<div><div class="rk-big">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LEVEL ${p.level}</div>
-        <div class="sub" style="margin:0">${rankInfo(p.level).name.toUpperCase()}${p.prestige ? ` · ${prestigeName(p.prestige).toUpperCase()}` : ''} · ${p.xp.toLocaleString()} XP this prestige</div></div></div>
-      <div class="prestige-box">
-        ${ready
-          ? `<b>PRESTIGE ${p.prestige + 1} IS AVAILABLE</b><span>Resets you to level 1 and re-locks level unlocks. You keep your stats, weapon kills and a new prestige emblem and banner.</span>
-             <button class="go" type="button" data-act="prestige">${this.prestigeArmed ? 'CONFIRM: RESET TO LEVEL 1' : `ENTER PRESTIGE ${p.prestige + 1}`}</button>`
-          : `<b>${p.prestige >= MAX_PRESTIGE ? 'MAX PRESTIGE' : `PRESTIGE ${p.prestige + 1} AT LEVEL ${MAX_LEVEL}`}</b><span>Reach level ${MAX_LEVEL} to reset with a new emblem. ${MAX_PRESTIGE} prestiges in total.</span>`}
+      <div class="cols2">
+        <div>
+          <div class="rankhead">${badgeImg(p.level, p.prestige, 96)}<div><div class="rk-big">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LEVEL ${p.level}</div>
+            <div class="sub" style="margin:0">${rankInfo(p.level).name.toUpperCase()}${p.prestige ? ` · ${prestigeName(p.prestige).toUpperCase()}` : ''} · ${p.xp.toLocaleString()} XP this prestige</div></div></div>
+          <div class="prestige-box">
+            ${ready
+              ? `<b>PRESTIGE ${p.prestige + 1} IS AVAILABLE</b><span>Resets you to level 1 and re-locks level unlocks. You keep your stats, weapon kills, camos, challenges and a new prestige emblem and banner.</span>
+                 <button class="go" type="button" data-act="prestige">${this.prestigeArmed ? 'CONFIRM: RESET TO LEVEL 1' : `ENTER PRESTIGE ${p.prestige + 1}`}</button>`
+              : `<b>${p.prestige >= MAX_PRESTIGE ? 'MAX PRESTIGE' : `PRESTIGE ${p.prestige + 1} AT LEVEL ${MAX_LEVEL}`}</b><span>Reach level ${MAX_LEVEL} to reset with a new emblem. ${MAX_PRESTIGE} prestiges in total.</span>`}
+          </div>
+          <div class="label">COMBAT RECORD</div>
+          <div class="record">${record.map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('')}</div>
+          <div class="label">WEAPON KILLS</div><div class="grid2">${wk}<div class="card"><b>${p.weaponKills.frag ?? 0}</b><span>FRAG GRENADE</span></div></div>
+        </div>
+        <div>
+          <div class="label" style="margin-top:0">CAMOS & MASTERY</div>
+          <div class="sub">Five camos per weapon from headshot kills, then gold at ${GOLD_HEADS}. Gold on every weapon in a class unlocks that class's mastery camo.</div>
+          ${this.camoTrack()}
+        </div>
       </div>
       <div class="label">PRESTIGE EMBLEMS</div><div class="emblems">${emblems}</div>
-      <div class="label">RANK LADDER · 25 RANKS × 3 TIERS${MAX_LEVEL > ART_MAX_LEVEL ? ` · LEVELS ${ART_MAX_LEVEL + 1}–${MAX_LEVEL} KEEP COMMANDER III` : ''}</div><div class="emblems">${ladder}</div>
-      <div class="label">COMBAT RECORD</div>
-      <div class="grid2">
-        <div class="card"><b>${p.kills}</b><span>KILLS</span></div><div class="card"><b>${p.deaths}</b><span>DEATHS</span></div>
-        <div class="card"><b>${p.headshots}</b><span>HEADSHOTS</span></div><div class="card"><b>${p.bestStreak}</b><span>BEST STREAK</span></div>
-      </div>
-      <div class="label">WEAPON KILLS</div><div class="grid2">${wk}<div class="card"><b>${p.weaponKills.frag ?? 0}</b><span>FRAG GRENADE</span></div></div>
+      <div class="label">RANK LADDER · 25 RANKS × 3 TIERS</div><div class="emblems">${ladder}</div>
       <div class="label">UNLOCK TRACK · LEVELS 1–${MAX_LEVEL}</div>${track}`;
   }
 
   private bindPanel() {
-    const panel = this.root.querySelector('#panel') as HTMLDivElement;
+    const panel = this.root.querySelector('#panel') as HTMLDivElement | null;
+    if (!panel) return;
     const g = this.ctx.game;
     const rerender = () => {
       const keep = panel.scrollTop;
@@ -328,6 +552,7 @@ export class Menu {
     pick('diff', (v) => (this.difficulty = v as DifficultyId));
     pick('map', (v) => (this.mapId = v));
     pick('slot', (v) => (this.openSlot = this.openSlot === v ? null : v));
+    pick('chf', (v) => (this.chFilter = v as typeof this.chFilter));
     pick('edit', (v) => {
       this.editIndex = Number(v);
       this.openSlot = null;
@@ -340,10 +565,18 @@ export class Menu {
       b.addEventListener('click', () => {
         if (b.classList.contains('locked')) return;
         const c = this.ctx.classes[this.editIndex] as unknown as Record<string, string>;
-        c[b.dataset.set!] = b.dataset.val!;
+        const key = b.dataset.set!;
+        c[key] = b.dataset.val!;
         if (c.secondary === 'r357') c.secAttach = 'none';
+        // a new gun keeps its camo only if that camo is earned on the new gun too
+        if (key === 'weapon' || key === 'secondary') {
+          const camoKey = key === 'weapon' ? 'camo' : 'secCamo';
+          const w = c[key] as WeaponId;
+          const camo = camosFor(w).find((o) => o.id === c[camoKey]);
+          if (!camo || !isUnlocked(camo, this.ctxFor(this.weaponCtx(w)))) c[camoKey] = 'none';
+        }
         saveClasses(this.ctx.classes);
-        this.openSlot = b.dataset.set === 'secondary' ? 'secondary' : null;
+        this.openSlot = key === 'secondary' ? 'secondary' : null;
         if (this.context === 'pause') g.setClass(this.editIndex, this.ctx.classes);
         rerender();
       }),
@@ -362,13 +595,13 @@ export class Menu {
     name?.addEventListener('change', () => {
       this.ctx.classes[this.editIndex].name = name.value.trim().toUpperCase().slice(0, 14) || `CLASS ${this.editIndex + 1}`;
       saveClasses(this.ctx.classes);
-      this.render();
+      rerender();
     });
     const call = panel.querySelector('#callsign') as HTMLInputElement | null;
     call?.addEventListener('change', () => {
       g.profileData.callsign = call.value.trim().toUpperCase().slice(0, 16) || 'OPERATOR';
       g.saveProfileNow();
-      this.render();
+      rerender();
     });
 
     // settings
@@ -395,6 +628,7 @@ export class Menu {
     panel.querySelector('#s-unlock')?.addEventListener('change', (e) => {
       s.unlockAll = (e.target as HTMLInputElement).checked;
       this.ctx.saveSettings();
+      rerender();
     });
 
     // live 3D preview
@@ -417,6 +651,7 @@ export class Menu {
     }
   }
 }
+
 
 /** Studio-lit render of a weapon or a soldier (one persistent WebGL context). */
 class Preview {

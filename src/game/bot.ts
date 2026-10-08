@@ -3,7 +3,7 @@ import type { GameMap } from './map';
 import { raycastBoxes } from './map';
 import type { Effects } from './effects';
 import type { Sfx } from './audio';
-import type { WeaponId } from './loadout';
+import { HEADSHOT_MULT, type WeaponId } from './loadout';
 import { LAYER_CHAR, LAYER_FX } from './renderer';
 import { blobShadowTex, flashTex } from './textures';
 import { clamp, damp, setLayerDeep } from './util';
@@ -439,7 +439,7 @@ export class Bot implements Combatant {
       const head = !t.isPlayer && Math.random() < 0.15;
       const base = t.isPlayer ? 11 + Math.random() * 6 : this.weapon === 'vk47' ? 36 : 29;
       const dir = target.clone().sub(from).normalize();
-      w.hit(t, Math.round(base * w.difficulty.damage * (head ? 1.5 : 1)), this, head, dir);
+      w.hit(t, Math.round(base * w.difficulty.damage * (head ? HEADSHOT_MULT : 1)), this, head, dir);
     } else if (t.isPlayer && Math.random() < 0.4) {
       w.sfx.whizz(pan);
     }

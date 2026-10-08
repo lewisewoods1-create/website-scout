@@ -22,6 +22,7 @@ export interface Loadout {
   mag: MagId;
   camo: CamoId;
   secondary: SecondaryId;
+  secCamo: CamoId;
   secAttach: SecAttachId;
   tactical: TacticalId;
   perk1: Perk1;
@@ -86,6 +87,10 @@ export interface Choice<T extends string = string> {
   level?: number;
   /** kills with this weapon required */
   kills?: number;
+  /** headshot kills with this weapon required (camos) */
+  heads?: number;
+  /** mastery camo: needs gold on every weapon in this class */
+  mastery?: WeaponClassId;
   swatch?: string;
 }
 
@@ -136,36 +141,74 @@ export const PERKS3: Choice<Perk3>[] = [
   { id: 'steady', name: 'STEADY HANDS', desc: '35% tighter hip-fire.' },
   { id: 'quickhands', name: 'QUICK HANDS', desc: '30% faster reloads.', level: 3 },
 ];
+// ---------------------------------------------------------------- camos
+
+/** Per-weapon camos, earned with headshot kills on that weapon. Gold is the sixth. */
 export const CAMOS: Choice<CamoId>[] = [
-  { id: 'none', name: 'FACTORY', desc: '', swatch: '#1d1f21' },
-  { id: 'desert', name: 'DESERT DIGITAL', desc: '', level: 5, swatch: '#b49a6b' },
-  { id: 'woodland', name: 'WOODLAND', desc: '', level: 12, swatch: '#5d6b3a' },
-  { id: 'urban', name: 'URBAN', desc: '', level: 20, swatch: '#8c9094' },
-  { id: 'crimson', name: 'CRIMSON TIGER', desc: '', level: 35, swatch: '#7a1a14' },
-  { id: 'gold', name: 'GOLD', desc: '', level: 70, swatch: '#c9a24a' },
+  { id: 'none', name: 'FACTORY', desc: 'Stock finish.', swatch: '#1d1f21' },
+  { id: 'desert', name: 'DESERT DIGITAL', desc: '', heads: 10, swatch: '#b49a6b' },
+  { id: 'woodland', name: 'WOODLAND', desc: '', heads: 25, swatch: '#5d6b3a' },
+  { id: 'urban', name: 'URBAN', desc: '', heads: 50, swatch: '#8c9094' },
+  { id: 'arctic', name: 'ARCTIC SPLINTER', desc: '', heads: 75, swatch: '#c9d6df' },
+  { id: 'crimson', name: 'CRIMSON TIGER', desc: '', heads: 100, swatch: '#7a1a14' },
+  { id: 'gold', name: 'GOLD', desc: 'Weapon mastered.', heads: 150, swatch: '#c9a24a' },
 ];
+export const GOLD_HEADS = 150;
+
+export type WeaponClassId = 'ar' | 'handgun';
+export const WEAPON_CLASSES: Record<WeaponClassId, { name: string; weapons: WeaponId[]; camo: Choice<CamoId> }> = {
+  ar: {
+    name: 'ASSAULT RIFLES',
+    weapons: ['kr4', 'vk47'],
+    camo: { id: 'obsidian', name: 'OBSIDIAN', desc: 'Mastery camo: gold on every assault rifle.', mastery: 'ar', swatch: '#1a1024' },
+  },
+  handgun: {
+    name: 'HANDGUNS',
+    weapons: ['p9', 'r357'],
+    camo: { id: 'prism', name: 'PRISM', desc: 'Mastery camo: gold on every handgun.', mastery: 'handgun', swatch: '#7fd6e8' },
+  },
+};
+
+export function classOf(w: WeaponId): WeaponClassId {
+  return WEAPONS[w].slot === 'primary' ? 'ar' : 'handgun';
+}
+
+/** Camo options for one weapon: the six headshot camos plus its class's mastery camo. */
+export function camosFor(w: WeaponId): Choice<CamoId>[] {
+  return [...CAMOS, WEAPON_CLASSES[classOf(w)].camo];
+}
+
+export const hasGold = (heads: Record<string, number>, w: WeaponId) => (heads[w] ?? 0) >= GOLD_HEADS;
+export const hasMastery = (heads: Record<string, number>, c: WeaponClassId) => WEAPON_CLASSES[c].weapons.every((w) => hasGold(heads, w));
 
 export interface UnlockCtx {
   level: number;
   /** kills with the weapon the choice belongs to */
   kills: number;
+  /** headshot kills with that weapon */
+  heads?: number;
+  /** all headshot counts, for mastery camos */
+  allHeads?: Record<string, number>;
   all: boolean;
 }
 
 export function isUnlocked(c: Choice, ctx: UnlockCtx) {
   if (ctx.all) return true;
-  return (c.level ?? 1) <= ctx.level && (c.kills ?? 0) <= ctx.kills;
+  if (c.mastery) return hasMastery(ctx.allHeads ?? {}, c.mastery);
+  return (c.level ?? 1) <= ctx.level && (c.kills ?? 0) <= ctx.kills && (c.heads ?? 0) <= (ctx.heads ?? 0);
 }
 
 export function lockText(c: Choice, weaponName: string) {
+  if (c.mastery) return `GOLD ON ALL ${WEAPON_CLASSES[c.mastery].name}`;
+  if (c.heads) return `${c.heads} HEADSHOT KILLS WITH ${weaponName}`;
   if (c.kills) return `${c.kills} KILLS WITH ${weaponName}`;
   return `LVL ${c.level}`;
 }
 
 export const DEFAULT_CLASSES: Loadout[] = [
-  { name: 'ASSAULT', weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'grip', mag: 'std', camo: 'none', secondary: 'p9', secAttach: 'none', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
-  { name: 'RIFLEMAN', weapon: 'vk47', optic: 'iron', muzzle: 'none', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secAttach: 'none', tactical: 'smoke', perk1: 'pockets', perk2: 'hardhitter', perk3: 'quickhands' },
-  { name: 'SPEC OPS', weapon: 'kr4', optic: 'reflex', muzzle: 'suppressor', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secAttach: 'suppressor', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
+  { name: 'ASSAULT', weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'grip', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
+  { name: 'RIFLEMAN', weapon: 'vk47', optic: 'iron', muzzle: 'none', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'pockets', perk2: 'hardhitter', perk3: 'quickhands' },
+  { name: 'SPEC OPS', weapon: 'kr4', optic: 'reflex', muzzle: 'suppressor', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'suppressor', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
 ];
 
 const KEY = 'deadpixel.classes.v1';
@@ -208,6 +251,9 @@ export interface GunStats {
   suppressed: boolean;
   damageAt(dist: number): number;
 }
+
+/** Damage multiplier for a hit on the head sphere (players and bots alike). */
+export const HEADSHOT_MULT = 2;
 
 export function computeStats(l: Loadout, slot: 'primary' | 'secondary' = 'primary'): GunStats {
   const secondary = slot === 'secondary';

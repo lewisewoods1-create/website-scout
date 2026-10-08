@@ -513,7 +513,7 @@ export function woodTex(seed = 71) {
   return hires(c);
 }
 
-export type CamoId = 'none' | 'desert' | 'woodland' | 'urban' | 'crimson' | 'gold';
+export type CamoId = 'none' | 'desert' | 'woodland' | 'urban' | 'arctic' | 'crimson' | 'gold' | 'obsidian' | 'prism';
 
 /** Weapon camo maps (painted finishes, not fabric). */
 export function weaponCamoTex(id: CamoId) {
@@ -525,6 +525,9 @@ export function weaponCamoTex(id: CamoId) {
     urban: ['#8c9094', '#5c6064', '#b8bcc0', '#2f3236'],
     crimson: ['#7a1a14', '#1a0d0c', '#a8301f', '#3b0f0b'],
     gold: ['#c9a24a', '#e4c46a', '#a17d2c', '#f2dc8a'],
+    arctic: ['#dfe7ec', '#9fb2c0', '#f6f8fa', '#5f7383'],
+    obsidian: ['#0d0a12', '#1c1228', '#06050a', '#2b1840'],
+    prism: ['#7fd6e8'],
   };
   const p = pal[id] ?? pal.desert;
   ctx.fillStyle = p[0];
@@ -551,6 +554,59 @@ export function weaponCamoTex(id: CamoId) {
       for (let x = 0; x <= 512; x += 32) ctx.lineTo(x, y + Math.sin(x * 0.03 + i) * 14 + (rnd() - 0.5) * 10);
       for (let x = 512; x >= 0; x -= 32) ctx.lineTo(x, y + 6 + rnd() * 8 + Math.sin(x * 0.03 + i) * 14);
       ctx.fill();
+    }
+  } else if (id === 'arctic') {
+    // splinter: sharp shards in three tones
+    for (let layer = 1; layer < p.length; layer++) {
+      ctx.fillStyle = p[layer];
+      for (let i = 0; i < 70 - layer * 15; i++) {
+        const x = rnd() * 512;
+        const y = rnd() * 512;
+        const a = rnd() * Math.PI;
+        const len = 40 + rnd() * 90;
+        const w = 8 + rnd() * 18;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+        ctx.lineTo(x + Math.cos(a) * len * 0.6 - Math.sin(a) * w, y + Math.sin(a) * len * 0.6 + Math.cos(a) * w);
+        ctx.fill();
+      }
+    }
+  } else if (id === 'obsidian') {
+    // volcanic glass: black base, glowing violet/teal fracture veins
+    for (let i = 0; i < 26; i++) {
+      ctx.strokeStyle = i % 3 === 0 ? 'rgba(80,220,230,0.55)' : 'rgba(170,80,255,0.6)';
+      ctx.lineWidth = 1 + rnd() * 2.5;
+      ctx.shadowColor = ctx.strokeStyle;
+      ctx.shadowBlur = 8;
+      let x = rnd() * 512;
+      let y = rnd() * 512;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let s = 0; s < 8; s++) {
+        x += (rnd() - 0.5) * 90;
+        y += (rnd() - 0.5) * 90;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  } else if (id === 'prism') {
+    // iridescent facets: triangles cycling through the hue wheel
+    const n = 12;
+    const s = 512 / n;
+    for (let gy = 0; gy < n; gy++) {
+      for (let gx = 0; gx < n; gx++) {
+        for (let t = 0; t < 2; t++) {
+          const hue = ((gx + gy) * 18 + t * 40 + rnd() * 30) % 360;
+          ctx.fillStyle = `hsl(${hue} 70% ${55 + rnd() * 15}%)`;
+          ctx.beginPath();
+          ctx.moveTo(gx * s, gy * s);
+          ctx.lineTo((gx + 1) * s, (gy + t) * s);
+          ctx.lineTo((gx + 1 - t) * s, (gy + 1) * s);
+          ctx.fill();
+        }
+      }
     }
   } else if (id === 'gold') {
     const g = ctx.createLinearGradient(0, 0, 512, 512);

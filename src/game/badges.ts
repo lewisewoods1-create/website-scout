@@ -16,7 +16,7 @@ interface BadgeApi {
 
 const B = (globalThis as unknown as { DeadPixelsBadges: BadgeApi }).DeadPixelsBadges;
 
-/** The pack draws 75 levels (25 ranks x 3 tiers); 76-85 reuse the Commander III badge. */
+/** The pack draws 75 levels (25 ranks x 3 tiers), matching MAX_LEVEL. */
 export const ART_MAX_LEVEL = 75;
 
 const uriCache = new Map<string, string>();
@@ -53,9 +53,42 @@ export function badgeImg(level: number, prestige: number, size = 56, animate = t
   return `<img class="badge" src="${staticUri(level, prestige)}" width="${size}" height="${size}" alt="${label}" title="${label}"${anim} draggable="false">`;
 }
 
+// Small raster copies for busy, fast-changing UI (the in-match scoreboard): the
+// browser decodes a tiny PNG far faster than re-rasterising a detailed SVG.
+const thumbs = new Map<string, string>();
+// holds each loading Image so it can't be garbage-collected before it fires
+const thumbPending = new Map<string, HTMLImageElement>();
+let thumbVer = 0;
+/** Bumps whenever a new thumbnail finishes, so cached markup can refresh. */
+export const thumbVersion = () => thumbVer;
+
+/** Static (non-animated) badge for small sizes; falls back to the SVG until the raster is ready. */
+export function badgeThumb(level: number, prestige: number, size: number) {
+  const key = `${prestige > 0 ? `p${prestige}` : `l${Math.min(level, ART_MAX_LEVEL)}`}@${size}`;
+  const url = thumbs.get(key);
+  if (!url) {
+    if (!thumbPending.has(key)) {
+      const px = Math.ceil(size * Math.min(2, window.devicePixelRatio || 1));
+      const img = new Image();
+      thumbPending.set(key, img);
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = c.height = px;
+        c.getContext('2d')!.drawImage(img, 0, 0, px, px);
+        // a tiny PNG (a few KB) instead of the full vector source
+        thumbs.set(key, c.toDataURL('image/png'));
+        thumbPending.delete(key);
+        thumbVer++;
+      };
+      img.src = staticUri(level, prestige);
+    }
+    return badgeImg(level, prestige, size, false);
+  }
+  return `<img class="badge" src="${url}" width="${size}" height="${size}" alt="" draggable="false">`;
+}
+
 export function rankInfo(level: number) {
   const r = B.rankOf(Math.min(level, ART_MAX_LEVEL));
-  if (level > ART_MAX_LEVEL) return { name: 'Commander', abbr: 'CMDR', tier: 3 };
   return { name: r.name, abbr: r.abbr, tier: r.tier };
 }
 

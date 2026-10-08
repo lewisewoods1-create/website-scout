@@ -29,15 +29,19 @@ const SMOKE_LIFE = 14;
 const SMOKE_R = 4.5;
 const G = 14;
 
-/** Detailed full-res grenade models, built once and cloned per throw. */
-function buildModels(m: Materials): Record<ThrowKind, THREE.Group> {
+/** Detailed full-res grenade models, built once and cloned per throw (also held in first person). */
+export function buildGrenadeModels(m: Materials, layer = LAYER_CHAR): Record<ThrowKind, THREE.Group> {
   const cyl = (r: number, h: number, seg = 28) => new THREE.CylinderGeometry(r, r, h, seg);
   const frag = new THREE.Group();
   mesh(new THREE.SphereGeometry(0.031, 32, 24), m.helmet, frag, { scale: [1, 1.08, 1] });
   mesh(new THREE.TorusGeometry(0.031, 0.0025, 8, 32), m.helmet, frag, { rot: [Math.PI / 2, 0, 0] });
   mesh(cyl(0.011, 0.022), m.steel, frag, { pos: [0, 0.04, 0] });
   mesh(rbox(0.012, 0.004, 0.06, 0.0015), m.steel, frag, { pos: [0, 0.035, 0.022], rot: [-0.9, 0, 0] }); // spoon
-  mesh(new THREE.TorusGeometry(0.01, 0.0015, 8, 20), m.steel, frag, { pos: [0.016, 0.046, 0], rot: [0, Math.PI / 2, 0] }); // pin ring
+  const pinRing = (g: THREE.Group, y: number) => {
+    const pin = mesh(new THREE.TorusGeometry(0.01, 0.0015, 8, 20), m.steel, g, { pos: [0.016, y, 0], rot: [0, Math.PI / 2, 0] });
+    pin.name = 'pin';
+  };
+  pinRing(frag, 0.046);
 
   const smoke = new THREE.Group();
   mesh(cyl(0.03, 0.12), m.parkerized, smoke);
@@ -45,6 +49,7 @@ function buildModels(m: Materials): Record<ThrowKind, THREE.Group> {
   for (let i = 0; i < 4; i++) mesh(cyl(0.004, 0.002, 8), m.hole, smoke, { pos: [Math.cos(i * 1.57) * 0.02, 0.061, Math.sin(i * 1.57) * 0.02] });
   mesh(cyl(0.012, 0.018), m.steel, smoke, { pos: [0, 0.068, 0] });
   mesh(rbox(0.012, 0.004, 0.07, 0.0015), m.steel, smoke, { pos: [0, 0.055, 0.03], rot: [-1.2, 0, 0] });
+  pinRing(smoke, 0.072);
 
   const stun = new THREE.Group();
   mesh(cyl(0.027, 0.11), m.polymer, stun);
@@ -56,9 +61,10 @@ function buildModels(m: Materials): Record<ThrowKind, THREE.Group> {
   }
   mesh(cyl(0.012, 0.018), m.steel, stun, { pos: [0, 0.064, 0] });
   mesh(rbox(0.012, 0.004, 0.065, 0.0015), m.steel, stun, { pos: [0, 0.05, 0.028], rot: [-1.2, 0, 0] });
+  pinRing(stun, 0.068);
 
   for (const g of [frag, smoke, stun]) {
-    setLayerDeep(g, LAYER_CHAR);
+    setLayerDeep(g, layer);
     g.traverse((o) => {
       o.castShadow = true;
     });
@@ -79,7 +85,9 @@ export class Throwables<O> {
 
   constructor(scene: THREE.Scene, m: Materials) {
     this.scene = scene;
-    this.models = buildModels(m);
+    this.models = buildGrenadeModels(m);
+    // thrown grenades have already lost their pin
+    for (const g of Object.values(this.models)) g.getObjectByName('pin')!.visible = false;
     this.smokeMat = new THREE.SpriteMaterial({ map: smokeTex(), color: 0xb8b8b0, transparent: true, depthWrite: false, opacity: 0 });
   }
 

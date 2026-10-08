@@ -14,11 +14,12 @@ import { Hud, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
-import { computeStats, loadClasses, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type WeaponId } from './loadout';
+import { CAMOS, classOf, computeStats, hasMastery, HEADSHOT_MULT, isUnlocked, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type WeaponId } from './loadout';
 import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
 import { nextUnlock, unlockTrack } from './unlocks';
-import { badgeImg } from './badges';
+import { badgeThumb, thumbVersion } from './badges';
 import { playerCard } from './cosmetics';
+import { bump, bumpMax, checkChallenges } from './challenges';
 import { clamp, damp, lerp } from './util';
 
 export interface Settings {
@@ -129,6 +130,9 @@ export class Game {
   private timeLeft = 0;
   private matchXp = 0;
   private streak = 0;
+  /** multi-kill tracking: time of the last kill and how many in the chain */
+  private lastKillT = -99;
+  private multi = 0;
   private sweepReady = false;
   private sweepT = 0;
   private now = 0;
@@ -154,8 +158,6 @@ export class Game {
   /** TDM start sides: axis and which end team 0 starts at */
   private sideAxis: 'x' | 'z' = 'x';
   private sideSign = 1;
-  private boardKey = '';
-  private boardCache = '';
   /** main.ts locks the pointer once a class is picked */
   onClassChosen: () => void = () => {};
   paused = false;
@@ -299,6 +301,14 @@ export class Game {
     saveProfile(this.profile);
   }
 
+  /** Mark challenges finished by derived stats (level, camos) without in-match banners; for the menu. */
+  syncChallenges() {
+    if (this.phase === 'match') return;
+    this.runChallenges();
+    this.hud.clearBanners();
+    saveProfile(this.profile);
+  }
+
   get prestigeReady() {
     return canPrestige(this.profile);
   }
@@ -306,6 +316,8 @@ export class Game {
   prestige() {
     const ok = enterPrestige(this.profile);
     if (ok) {
+      this.runChallenges();
+      this.hud.clearBanners(); // in the menu: the Challenges page shows what completed
       saveProfile(this.profile);
       this.sfx.levelUp();
     }
@@ -357,6 +369,8 @@ export class Game {
     this.player.alive = false;
     this.hud.setVisible(false);
     this.hud.endScreen(null);
+    this.hud.clearBanners();
+    this.vm.cancelThrow();
     this.hud.deadScreen(false);
     this.world.difficulty = DIFFICULTIES.regular;
     this.world.combatants = [];
@@ -382,6 +396,8 @@ export class Game {
     this.timeLeft = MODES[cfg.mode].minutes * 60;
     this.matchXp = 0;
     this.streak = 0;
+    this.multi = 0;
+    this.lastKillT = -99;
     this.sweepReady = false;
     this.sweepT = 0;
     this.killedBy = '';
@@ -406,6 +422,8 @@ export class Game {
       b.level = 1 + Math.floor(Math.random() * MAX_LEVEL);
       this.world.combatants.push(b);
     });
+    // rasterise scoreboard badges now so the first Tab press doesn't stall
+    for (const c of this.world.combatants) badgeThumb(c.level, c.prestige, 30);
     // each match picks fresh start sides so the opening fight moves around the map
     this.sideAxis = Math.random() < 0.5 ? 'x' : 'z';
     this.sideSign = Math.random() < 0.5 ? 1 : -1;
@@ -442,6 +460,7 @@ export class Game {
     const p = this.startSpawn(this.agent);
     this.player.spawn(p, Math.atan2(p.x, p.z));
     this.vm.reload = -1;
+    this.vm.cancelThrow();
     // fly the overview camera down into the player's eyes
     this.pregame = 'zoom';
     this.pregameT = 0;
@@ -499,6 +518,14 @@ export class Game {
   private applyClass(idx: number) {
     this.classIdx = idx;
     const l = this.classes[idx];
+    // a camo that isn't earned (old saves had level-based camos) falls back to factory
+    const camoOk = (w: WeaponId, id: string) => {
+      const c = camosFor(w).find((o) => o.id === id);
+      const heads = this.profile.weaponHeads;
+      return !!c && isUnlocked(c, { level: 1, kills: 0, heads: heads[w] ?? 0, allHeads: heads, all: this.settings.unlockAll });
+    };
+    if (!camoOk(l.weapon, l.camo)) l.camo = 'none';
+    if (!camoOk(l.secondary, l.secCamo)) l.secCamo = 'none';
     const stats = computeStats(l);
     this.guns[0].reset(stats);
     this.guns[1].reset(computeStats(l, 'secondary'));
@@ -513,6 +540,7 @@ export class Game {
   private endMatch() {
     this.phase = 'ended';
     this.player.alive = false;
+    this.vm.cancelThrow();
     const before = levelForXp(this.profile.xp);
     let title: string;
     let cls: string;
@@ -528,6 +556,17 @@ export class Game {
       title = `${place}${['ST', 'ND', 'RD'][place - 1] ?? 'TH'} PLACE`;
       cls = place <= 3 ? 'win' : 'lose';
       bonus += [600, 400, 200][place - 1] ?? 0;
+    }
+    const won = this.cfg.mode === 'tdm' ? this.teamScore[0] > this.teamScore[1] : rows[0] === this.agent;
+    const pr = this.profile;
+    bump(pr, 'matches');
+    bumpMax(pr, 'best_match_kills', this.agent.kills);
+    if (won) {
+      bump(pr, 'wins');
+      bump(pr, `${this.cfg.mode}_wins`);
+      bump(pr, `win_${this.cfg.mapId}`);
+      bump(pr, `win_${this.cfg.difficulty}`);
+      if (this.agent.deaths === 0) bump(pr, 'flawless');
     }
     this.addXp(bonus, before);
     const kd = this.agent.deaths ? (this.agent.kills / this.agent.deaths).toFixed(2) : String(this.agent.kills);
@@ -624,16 +663,25 @@ export class Game {
     if (tb.damage(dmg, shooter, this.now)) this.registerKill(shooter, tb, head);
   }
 
+  /** Start the throw animation; the grenade leaves the hand partway through. */
   private throwItem(kind: ThrowKind) {
+    this.gun.cancelReload();
+    this.vm.throwAnim(
+      kind,
+      () => this.sfx.pin(),
+      () => {
+        if (this.phase === 'match' && this.player.alive) this.releaseThrow(kind);
+      },
+    );
+  }
+
+  private releaseThrow(kind: ThrowKind) {
     const cam = this.camera;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
     const from = cam.position.clone().addScaledVector(fwd, 0.4).addScaledVector(right, 0.15).add(new THREE.Vector3(0, -0.1, 0));
     const vel = fwd.multiplyScalar(kind === 'frag' ? 17 : 15).add(new THREE.Vector3(0, 3, 0)).addScaledVector(this.player.vel, 0.5);
     this.throwables.throw(kind, from, vel, this.agent);
-    this.vm.throwAnim();
-    this.sfx.pin();
-    this.gun.reloading = -1;
   }
 
   /** Grenade went off: damage, stun or smoke. */
@@ -674,7 +722,10 @@ export class Game {
     for (const b of this.bots) {
       if (!b.active || !b.alive || (b !== owner && !this.hostile(owner, b))) continue;
       const d = b.eye(tmp).distanceTo(pos);
-      if (d < 10 && lineClear(b.eye(tmp))) b.stunnedUntil = this.now + 1 + 3 * (1 - d / 10);
+      if (d < 10 && lineClear(b.eye(tmp))) {
+        b.stunnedUntil = this.now + 1 + 3 * (1 - d / 10);
+        if (owner === this.agent && b !== owner) bump(this.profile, 'stunned_enemies');
+      }
     }
     if (this.player.alive) {
       const d = cam.distanceTo(pos);
@@ -715,6 +766,9 @@ export class Game {
     if (p.health <= 0) {
       p.health = 0;
       p.alive = false;
+      // killed mid-throw with the pin out: the grenade drops where you stood
+      const cooked = this.vm.cancelThrow();
+      if (cooked) this.throwables.throw(cooked, this.camera.position.clone().setY(p.pos.y + 1), new THREE.Vector3(0, 1, 0), this.agent);
       this.profile.deaths++;
       this.streak = 0;
       this.respawnT = 3.5;
@@ -765,11 +819,12 @@ export class Game {
     if (!st.suppressed) this.effects.muzzle(muzzle);
 
     if (hitBot && !this.isFriendly(hitBot)) {
-      const dmg = this.gun.damageAt(best) * (head ? 1.5 : 1);
+      const dmg = this.gun.damageAt(best) * (head ? HEADSHOT_MULT : 1);
       const killed = hitBot.damage(dmg, this.agent, this.now);
       this.effects.blood(end, dir, head);
-      this.hud.hitmarker(killed);
-      this.sfx.hitmarker(killed);
+      this.hud.hitmarker(killed, head);
+      if (head) this.sfx.headshot(killed);
+      else this.sfx.hitmarker(killed);
       if (killed) this.registerKill(this.agent, hitBot, head);
     } else if (!hitBot && wHit) {
       this.effects.impact(wHit.point, wHit.normal, wHit.surface);
@@ -795,8 +850,71 @@ export class Game {
     return s + this.bloom * lerp(1, 0.25, ads);
   }
 
+  /** Camo progression: headshot kills per weapon, gold, then class mastery. */
+  private onWeaponHeadshot(id: WeaponId) {
+    const heads = this.profile.weaponHeads;
+    const cls = classOf(id);
+    const masteredBefore = hasMastery(heads, cls);
+    const n = (heads[id] ?? 0) + 1;
+    heads[id] = n;
+    const camo = CAMOS.find((c) => c.heads === n);
+    if (camo) this.hud.showBanner(camo.id === 'gold' ? 'GOLD CAMO' : 'CAMO UNLOCKED', `${camo.name} FOR ${WEAPONS[id].name}`, 4);
+    if (!masteredBefore && hasMastery(heads, cls)) {
+      const wc = WEAPON_CLASSES[cls];
+      this.hud.showBanner('MASTERY CAMO', `${wc.camo.name} · ${wc.name}`, 5);
+      this.sfx.levelUp();
+    }
+  }
+
+  /** Challenge counters for one player kill, read from the player's state at the moment of the kill. */
+  private trackKill(victim: Combatant, head: boolean, weaponId: string) {
+    const pr = this.profile;
+    const p = this.player;
+    const frag = weaponId === 'frag';
+    bump(pr, 'kills');
+    if (head) bump(pr, 'headshots');
+    if (WEAPONS[weaponId as WeaponId]) bump(pr, `kills_${weaponId}`);
+    if (frag) bump(pr, 'frag_kills');
+    else {
+      bump(pr, this.vm.ads > 0.5 ? 'ads_kills' : 'hip_kills');
+      if (this.gun.stats.suppressed) bump(pr, 'suppressed_kills');
+    }
+    if (p.slide > 0) bump(pr, 'slide_kills');
+    else if (p.crouchT > 0.5) bump(pr, 'crouch_kills');
+    if (!p.onGround) bump(pr, 'air_kills');
+    if (victim.pos.distanceTo(p.pos) > 35) bump(pr, 'longshots');
+    if (victim.name === this.killedBy) bump(pr, 'paybacks');
+    if (!victim.isPlayer && (victim as Bot).stunnedUntil > this.now) bump(pr, 'stunned_kills');
+    if (this.world.combatants.reduce((s, c) => s + c.kills, 0) === 1) bump(pr, 'first_bloods');
+    this.multi = this.now - this.lastKillT < 3 ? this.multi + 1 : 1;
+    this.lastKillT = this.now;
+    if (this.multi === 2) bump(pr, 'double');
+    if (this.multi === 3) bump(pr, 'triple');
+    const s = this.streak + 1;
+    if (s === 3) bump(pr, 'streak3');
+    if (s === 5) bump(pr, 'streak5');
+    if (s === 10) bump(pr, 'streak10');
+  }
+
+  /** Pay out any challenges that just completed (loops, since their XP can level you into another). */
+  private runChallenges() {
+    for (let guard = 0; guard < 5; guard++) {
+      const level = levelForXp(this.profile.xp);
+      bumpMax(this.profile, 'level', level);
+      const fresh = checkChallenges(this.profile, level);
+      if (!fresh.length) return;
+      for (const c of fresh) {
+        grantXp(this.profile, c.xp);
+        this.matchXp += c.xp;
+        this.hud.showBanner('CHALLENGE COMPLETE', `${c.name} · +${c.xp} XP · BANNER UNLOCKED`, 4);
+      }
+      this.sfx.levelUp();
+    }
+  }
+
   private onPlayerKill(victim: Combatant, head: boolean, weaponId: string) {
     const before = levelForXp(this.profile.xp);
+    this.trackKill(victim, head, weaponId);
     let xp = XP.kill;
     this.hud.popup(`+${XP.kill}`);
     if (weaponId === 'frag') {
@@ -816,6 +934,7 @@ export class Game {
       xp += XP.headshot;
       this.hud.popup(`HEADSHOT +${XP.headshot}`, 'hs');
       this.profile.headshots++;
+      if (w) this.onWeaponHeadshot(w.id);
     }
     if (victim.pos.distanceTo(this.player.pos) > 35) {
       xp += XP.longshot;
@@ -845,10 +964,11 @@ export class Game {
   private addXp(xp: number, levelBefore: number) {
     grantXp(this.profile, xp);
     this.matchXp += xp;
+    this.runChallenges();
     const after = levelForXp(this.profile.xp);
     if (after > levelBefore) {
       const unlock = unlockTrack().get(after)?.join(' · ');
-      if (after >= MAX_LEVEL && canPrestige(this.profile)) this.hud.showBanner('LEVEL 85', 'PRESTIGE IS AVAILABLE IN BARRACKS', 5);
+      if (after >= MAX_LEVEL && canPrestige(this.profile)) this.hud.showBanner(`LEVEL ${MAX_LEVEL}`, 'PRESTIGE IS AVAILABLE IN BARRACKS', 5);
       else this.hud.showBanner('PROMOTED', `LEVEL ${after}${unlock ? ` · UNLOCKED: ${unlock}` : ''}`, 4);
       this.sfx.levelUp();
     }
@@ -876,15 +996,19 @@ export class Game {
     return [...this.world.combatants].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
   }
 
+  /** Cheap key for the scoreboard: the HUD only rebuilds the table when this changes. */
+  private boardKey() {
+    let k = `${this.teamScore}|${thumbVersion()}|${this.agent.level}|${this.agent.prestige}`;
+    for (const c of this.world.combatants) k += `,${c.id}:${c.kills}:${c.deaths}`;
+    return k;
+  }
+
   private boardHtml() {
-    const key = `${this.teamScore}|${this.world.combatants.map((c) => `${c.id}:${c.kills}:${c.deaths}`).join(',')}`;
-    if (key === this.boardKey) return this.boardCache;
-    this.boardKey = key;
+    // emblem (prestige badge or rank insignia) then the level number only
     const row = (c: Combatant) =>
-      `<tr class="${c.isPlayer ? 'me' : ''}"><td class="bd">${badgeImg(c.level, c.prestige, 30)}</td><td class="lv">${c.prestige ? `P${c.prestige}` : ''} ${c.level}</td><td>${c.isPlayer ? this.profile.callsign : c.name}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.kills * 100}</td></tr>`;
+      `<tr class="${c.isPlayer ? 'me' : ''}"><td class="bd">${badgeThumb(c.level, c.prestige, 30)}</td><td class="lv">${c.level}</td><td>${c.isPlayer ? this.profile.callsign : c.name}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.kills * 100}</td></tr>`;
     const head = '<tr><th></th><th>LVL</th><th>PLAYER</th><th>K</th><th>D</th><th>SCORE</th></tr>';
-    this.boardCache = this.boardBody(row, head);
-    return this.boardCache;
+    return this.boardBody(row, head);
   }
 
   private boardBody(row: (c: Combatant) => string, head: string) {
@@ -1037,21 +1161,23 @@ export class Game {
     }
 
     if (p.alive && live) {
-      if (inp.pressed.has('KeyR') && this.gun.startReload()) this.lastReload = 0;
-      if (this.gun.ammo === 0 && this.gun.reserve > 0 && this.gun.reloading < 0) {
+      if (inp.pressed.has('KeyR') && !this.vm.busy && this.gun.startReload()) this.lastReload = 0;
+      if (this.gun.ammo === 0 && this.gun.reserve > 0 && this.gun.reloading < 0 && !this.vm.busy) {
         this.autoReloadT += dt;
         if (this.autoReloadT > 0.25 && this.gun.startReload()) this.lastReload = 0;
       } else this.autoReloadT = 0;
       if (inp.pressed.has('Digit4') && this.sweepReady) {
         this.sweepReady = false;
         this.sweepT = SWEEP_TIME;
+        bump(this.profile, 'sweeps');
         this.sfx.streak();
         this.hud.showBanner('SWEEP ONLINE', 'ENEMY POSITIONS REVEALED');
       }
       // weapon swap: 1 / 2 / mouse wheel
       const want = inp.pressed.has('Digit1') ? 0 : inp.pressed.has('Digit2') ? 1 : inp.wheel !== 0 ? 1 - this.active : this.active;
       if (want !== this.active && !this.vm.busy) {
-        this.gun.reloading = -1;
+        this.gun.cancelReload();
+        this.autoReloadT = 0;
         this.active = want;
         const st = this.gun.stats;
         this.vm.switchTo(cfgFromLoadout(this.classes[this.classIdx], want ? 'secondary' : 'primary'), st.eyeDist, st.recoil);
@@ -1067,7 +1193,7 @@ export class Game {
         this.throwItem(this.classes[this.classIdx].tactical);
       }
       const canFire = !p.sprinting && this.vm.reload < 0 && !this.vm.busy;
-      const shots = this.gun.update(dt, inp.fire, canFire);
+      const shots = this.gun.update(dt, inp.fire, canFire, this.vm.busy);
       for (let i = 0; i < shots && this.phase === 'match'; i++) this.shoot();
       if (inp.fire && !this.wasFiring && this.gun.ammo === 0 && this.gun.reserve === 0) this.sfx.dryFire();
       this.wasFiring = inp.fire;
@@ -1081,7 +1207,7 @@ export class Game {
     }
     this.vm.reload = this.gun.reloading;
     this.vm.reloadEmpty = this.gun.emptyReload;
-    this.vm.slideLocked = this.gun.stats.weapon === 'p9' && this.gun.ammo === 0 && this.gun.reloading < 0;
+    this.vm.slideLocked = this.gun.stats.weapon === 'p9' && this.gun.ammo === 0 && (this.gun.reloading < 0 || this.gun.reloading < 0.8);
     this.bloom = damp(this.bloom, 0, 4, dt);
     this.punch = damp(this.punch, 0, 10, dt);
     this.landDip = damp(this.landDip, 0, 8, dt);
@@ -1162,7 +1288,8 @@ export class Game {
     this.hud.scoreboard(this.agent.kills, this.agent.deaths, this.streak, this.matchXp);
     this.hud.streakInfo(this.streakHtml());
     this.hud.matchBar(this.matchHtml());
-    this.hud.scoreboardTable(inp.down('Tab'), this.boardHtml());
+    const tab = inp.down('Tab');
+    this.hud.scoreboardTable(tab, tab ? this.boardKey() : '', () => this.boardHtml());
     this.updateTags();
   }
 

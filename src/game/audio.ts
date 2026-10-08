@@ -152,6 +152,21 @@ export class Sfx {
     if (kill) this.tone(out, t + 0.06, 0.06, 1600, 1500, 'square', 0.35);
   }
 
+  /** Hit on the head: a bright helmet "dink" over a dull crack, distinct from the body hitmarker. */
+  headshot(kill = false) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(0.45, 0);
+    this.tone(out, t, 0.22, 3150, 3050, 'sine', 0.55);
+    this.tone(out, t, 0.16, 4720, 4600, 'sine', 0.25);
+    this.tone(out, t, 0.05, 2400, 2200, 'square', 0.25);
+    this.burst(out, t, 0.05, 'bandpass', 1800, 2, 0.6);
+    if (kill) {
+      this.tone(out, t + 0.07, 0.09, 1250, 900, 'square', 0.3);
+      this.burst(out, t + 0.07, 0.08, 'lowpass', 500, 1, 0.8);
+    }
+  }
+
   click(freq = 1800, vol = 0.25) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
