@@ -1,0 +1,471 @@
+import * as THREE from 'three';
+import { mulberry32 } from './util';
+
+type Ctx = CanvasRenderingContext2D;
+
+function canvas(w: number, h: number): [HTMLCanvasElement, Ctx] {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext('2d')!];
+}
+
+function noise(ctx: Ctx, w: number, h: number, rnd: () => number, amount: number, size = 1) {
+  for (let y = 0; y < h; y += size) {
+    for (let x = 0; x < w; x += size) {
+      const v = (rnd() - 0.5) * amount;
+      ctx.fillStyle = v > 0 ? `rgba(255,255,255,${v})` : `rgba(0,0,0,${-v})`;
+      ctx.fillRect(x, y, size, size);
+    }
+  }
+}
+
+/** Low-res, point-sampled, tiling texture: the PS1 half of the look. */
+function retro(c: HTMLCanvasElement): THREE.CanvasTexture {
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** High-res, filtered texture: the "insanely detailed" half. */
+function hires(c: HTMLCanvasElement, srgb = true): THREE.CanvasTexture {
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ---------------------------------------------------------------- world (64px)
+
+export function concreteTex(seed = 1, tint = '#77746c') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = tint;
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.22, 2);
+  noise(ctx, 64, 64, rnd, 0.12, 1);
+  // water stains running down
+  for (let i = 0; i < 5; i++) {
+    const x = rnd() * 64;
+    const g = ctx.createLinearGradient(0, 0, 0, 64);
+    g.addColorStop(0, 'rgba(30,25,20,0.35)');
+    g.addColorStop(1, 'rgba(30,25,20,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, 2 + rnd() * 4, 20 + rnd() * 44);
+  }
+  // panel seams
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, 63, 64, 1);
+  ctx.fillRect(63, 0, 1, 64);
+  // cracks
+  ctx.strokeStyle = 'rgba(20,18,15,0.6)';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    let x = rnd() * 64;
+    let y = rnd() * 64;
+    ctx.moveTo(x, y);
+    for (let j = 0; j < 5; j++) {
+      x += (rnd() - 0.5) * 12;
+      y += (rnd() - 0.5) * 12;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  return retro(c);
+}
+
+export function groundTex() {
+  const rnd = mulberry32(7);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#4a463e';
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.3, 1);
+  noise(ctx, 64, 64, rnd, 0.18, 4);
+  // gravel speckle
+  for (let i = 0; i < 90; i++) {
+    ctx.fillStyle = rnd() > 0.5 ? '#6b665a' : '#2c2a25';
+    ctx.fillRect(rnd() * 64, rnd() * 64, 1, 1);
+  }
+  // oil patches
+  for (let i = 0; i < 2; i++) {
+    ctx.fillStyle = 'rgba(15,15,18,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(rnd() * 64, rnd() * 64, 6 + rnd() * 8, 4 + rnd() * 5, rnd() * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return retro(c);
+}
+
+export function containerTex(paint: string, seed: number) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = paint;
+  ctx.fillRect(0, 0, 64, 64);
+  // corrugation
+  for (let x = 0; x < 64; x += 4) {
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x, 0, 1, 64);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x + 2, 0, 2, 64);
+  }
+  noise(ctx, 64, 64, rnd, 0.15, 2);
+  // rust bleed from top rail
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = `rgba(${110 + rnd() * 40},${50 + rnd() * 20},20,${0.3 + rnd() * 0.4})`;
+    const x = rnd() * 64;
+    ctx.fillRect(x, 0, 1 + rnd() * 2, 4 + rnd() * 26);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, 64, 2);
+  ctx.fillRect(0, 62, 64, 2);
+  return retro(c);
+}
+
+export function crateTex() {
+  const rnd = mulberry32(3);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#8a6a3c';
+  ctx.fillRect(0, 0, 64, 64);
+  for (let y = 0; y < 64; y += 8) {
+    ctx.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.15})`;
+    ctx.fillRect(0, y, 64, 8);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, y + 7, 64, 1);
+  }
+  noise(ctx, 64, 64, rnd, 0.18, 1);
+  // frame + X brace
+  ctx.strokeStyle = '#5b4325';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, 58, 58);
+  ctx.beginPath();
+  ctx.moveTo(6, 6);
+  ctx.lineTo(58, 58);
+  ctx.stroke();
+  ctx.fillStyle = '#2a1f12';
+  for (const [x, y] of [[4, 4], [59, 4], [4, 59], [59, 59]]) ctx.fillRect(x, y, 2, 2);
+  // stencil
+  ctx.fillStyle = 'rgba(20,20,20,0.7)';
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText('7.62', 34, 20);
+  return retro(c);
+}
+
+export function metalTex(seed = 11, base = '#3d4144') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.2, 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  for (let i = 0; i < 64; i += 16) ctx.fillRect(0, i, 64, 1);
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = 'rgba(120,60,25,0.35)';
+    ctx.fillRect(rnd() * 64, rnd() * 64, 2 + rnd() * 5, 1 + rnd() * 3);
+  }
+  return retro(c);
+}
+
+export function hazardTex() {
+  const [c, ctx] = canvas(32, 32);
+  ctx.fillStyle = '#d6a021';
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = '#1b1b1b';
+  for (let i = -32; i < 64; i += 16) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i + 8, 0);
+    ctx.lineTo(i + 8 + 32, 32);
+    ctx.lineTo(i + 32, 32);
+    ctx.fill();
+  }
+  noise(ctx, 32, 32, mulberry32(4), 0.2, 1);
+  return retro(c);
+}
+
+export function skyTex() {
+  const rnd = mulberry32(99);
+  const [c, ctx] = canvas(256, 128);
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0, '#120d24');
+  g.addColorStop(0.35, '#3a2147');
+  g.addColorStop(0.47, '#a2483a');
+  g.addColorStop(0.5, '#e08a3c');
+  g.addColorStop(0.53, '#3b2d2a');
+  g.addColorStop(1, '#16110f');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 128);
+  // sun
+  ctx.fillStyle = '#ffd38a';
+  ctx.beginPath();
+  ctx.arc(64, 60, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // streaky clouds
+  for (let i = 0; i < 40; i++) {
+    const y = 30 + rnd() * 30;
+    ctx.fillStyle = `rgba(${200 + rnd() * 55},${90 + rnd() * 60},${70 + rnd() * 40},${0.08 + rnd() * 0.18})`;
+    ctx.fillRect(rnd() * 256, y, 20 + rnd() * 60, 1 + rnd() * 2);
+  }
+  // distant skyline silhouette
+  ctx.fillStyle = '#0d0a0c';
+  let x = 0;
+  while (x < 256) {
+    const w = 4 + rnd() * 10;
+    const h = 2 + rnd() * 9;
+    ctx.fillRect(x, 64 - h, w, h + 2);
+    x += w;
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export function blobShadowTex() {
+  const [c, ctx] = canvas(32, 32);
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(0,0,0,0.75)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 32, 32);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  return t;
+}
+
+export function puffTex() {
+  const [c, ctx] = canvas(16, 16);
+  const g = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 16, 16);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  return t;
+}
+
+// ---------------------------------------------------------------- hi-res (detail models)
+
+/** Height map -> tangent-space normal map. */
+function heightToNormal(src: HTMLCanvasElement, strength: number): THREE.CanvasTexture {
+  const w = src.width;
+  const h = src.height;
+  const sd = src.getContext('2d')!.getImageData(0, 0, w, h).data;
+  const [c, ctx] = canvas(w, h);
+  const out = ctx.createImageData(w, h);
+  const H = (x: number, y: number) => sd[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * strength;
+      const dy = (H(x, y + 1) - H(x, y - 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      out.data[i] = ((-dx / len) * 0.5 + 0.5) * 255;
+      out.data[i + 1] = ((dy / len) * 0.5 + 0.5) * 255;
+      out.data[i + 2] = ((1 / len) * 0.5 + 0.5) * 255;
+      out.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  return hires(c, false);
+}
+
+/** Multi-tone woodland-desert camo with a woven ripstop grid. */
+export function camoFabric(palette: string[], seed: number) {
+  const rnd = mulberry32(seed);
+  const S = 512;
+  const [c, ctx] = canvas(S, S);
+  ctx.fillStyle = palette[0];
+  ctx.fillRect(0, 0, S, S);
+  for (let layer = 1; layer < palette.length; layer++) {
+    ctx.fillStyle = palette[layer];
+    const count = 26 - layer * 4;
+    for (let i = 0; i < count; i++) {
+      const cx = rnd() * S;
+      const cy = rnd() * S;
+      const r = 18 + rnd() * (60 - layer * 8);
+      // draw wrapped organic blobs
+      for (const ox of [-S, 0, S]) {
+        for (const oy of [-S, 0, S]) {
+          ctx.beginPath();
+          const pts = 9;
+          for (let p = 0; p <= pts; p++) {
+            const a = (p / pts) * Math.PI * 2;
+            const rr = r * (0.6 + rnd() * 0.6);
+            const px = cx + ox + Math.cos(a) * rr * 1.4;
+            const py = cy + oy + Math.sin(a) * rr;
+            if (p === 0) ctx.moveTo(px, py);
+            else ctx.quadraticCurveTo(px + (rnd() - 0.5) * r, py + (rnd() - 0.5) * r, px, py);
+          }
+          ctx.fill();
+        }
+      }
+    }
+  }
+  // ripstop grid + fibre noise
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let i = 0; i < S; i += 16) {
+    ctx.fillRect(i, 0, 1, S);
+    ctx.fillRect(0, i, S, 1);
+  }
+  noise(ctx, S, S, rnd, 0.08, 1);
+  const map = hires(c);
+
+  // weave height map
+  const [hc, hctx] = canvas(256, 256);
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      const warp = Math.sin((x / 4) * Math.PI) * 0.5 + 0.5;
+      const weft = Math.sin((y / 4) * Math.PI) * 0.5 + 0.5;
+      const over = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? warp : weft;
+      const rip = x % 32 < 2 || y % 32 < 2 ? 0.35 : 0;
+      const v = Math.min(1, over * 0.8 + rip + rnd() * 0.1) * 255;
+      hctx.fillStyle = `rgb(${v},${v},${v})`;
+      hctx.fillRect(x, y, 1, 1);
+    }
+  }
+  const normal = heightToNormal(hc, 2.5);
+  normal.repeat.set(4, 4);
+  return { map, normal };
+}
+
+/** Nylon webbing / cordura: solid colour with heavy weave. */
+export function corduraTex(color: string, seed: number) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(256, 256);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 256, 256);
+  noise(ctx, 256, 256, rnd, 0.1, 1);
+  // scuffs
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = `rgba(255,240,210,${rnd() * 0.06})`;
+    ctx.fillRect(rnd() * 256, rnd() * 256, 4 + rnd() * 20, 2 + rnd() * 8);
+  }
+  const map = hires(c);
+  const [hc, hctx] = canvas(128, 128);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const v = (((x >> 1) + (y >> 1)) % 2) * 160 + rnd() * 60;
+      hctx.fillStyle = `rgb(${v},${v},${v})`;
+      hctx.fillRect(x, y, 1, 1);
+    }
+  }
+  const normal = heightToNormal(hc, 1.5);
+  normal.repeat.set(6, 6);
+  return { map, normal };
+}
+
+/** Anodised / cerakote wear: roughness map with scratches and edge polish. */
+export function scratchRoughness(seed: number, base = 150) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(512, 512);
+  ctx.fillStyle = `rgb(${base},${base},${base})`;
+  ctx.fillRect(0, 0, 512, 512);
+  noise(ctx, 512, 512, rnd, 0.15, 2);
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 260; i++) {
+    const v = 40 + rnd() * 60;
+    ctx.strokeStyle = `rgba(${v},${v},${v},${0.3 + rnd() * 0.5})`;
+    ctx.beginPath();
+    const x = rnd() * 512;
+    const y = rnd() * 512;
+    const a = rnd() * Math.PI;
+    const l = 4 + rnd() * 40;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    ctx.stroke();
+  }
+  return hires(c, false);
+}
+
+/** Polymer grip stipple: bumpy normal map. */
+export function stippleNormal(seed: number) {
+  const rnd = mulberry32(seed);
+  const [hc, hctx] = canvas(256, 256);
+  hctx.fillStyle = '#000';
+  hctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2200; i++) {
+    const g = hctx.createRadialGradient(0, 0, 0, 0, 0, 3);
+    g.addColorStop(0, 'rgba(255,255,255,0.9)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    hctx.save();
+    hctx.translate(rnd() * 256, rnd() * 256);
+    hctx.fillStyle = g;
+    hctx.fillRect(-3, -3, 6, 6);
+    hctx.restore();
+  }
+  const n = heightToNormal(hc, 3);
+  n.repeat.set(3, 3);
+  return n;
+}
+
+export function skinTex() {
+  const rnd = mulberry32(21);
+  const [c, ctx] = canvas(256, 256);
+  ctx.fillStyle = '#b07d5f';
+  ctx.fillRect(0, 0, 256, 256);
+  noise(ctx, 256, 256, rnd, 0.06, 1);
+  for (let i = 0; i < 300; i++) {
+    ctx.fillStyle = `rgba(90,50,35,${rnd() * 0.12})`;
+    ctx.fillRect(rnd() * 256, rnd() * 256, 2, 2);
+  }
+  return hires(c);
+}
+
+/** Holographic sight reticle: 65 MOA ring + 1 MOA dot. */
+export function reticleTex() {
+  const [c, ctx] = canvas(256, 256);
+  ctx.clearRect(0, 0, 256, 256);
+  ctx.shadowColor = '#ff2a1a';
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = '#ff4a30';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(128, 128, 70, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#ff6a50';
+  ctx.beginPath();
+  ctx.arc(128, 128, 5, 0, Math.PI * 2);
+  ctx.fill();
+  for (const a of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+    ctx.fillRect(128 + Math.cos(a) * 70 - 3, 128 + Math.sin(a) * 70 - 3, 6, 6);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export function flashTex() {
+  const [c, ctx] = canvas(128, 128);
+  ctx.translate(64, 64);
+  for (let i = 0; i < 7; i++) {
+    ctx.rotate((Math.PI * 2) / 7);
+    const g = ctx.createLinearGradient(0, 0, 60, 0);
+    g.addColorStop(0, 'rgba(255,250,220,1)');
+    g.addColorStop(0.4, 'rgba(255,180,60,0.8)');
+    g.addColorStop(1, 'rgba(255,90,10,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(60, 0);
+    ctx.lineTo(0, 7);
+    ctx.fill();
+  }
+  const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 26);
+  rg.addColorStop(0, 'rgba(255,255,240,1)');
+  rg.addColorStop(1, 'rgba(255,160,40,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(-30, -30, 60, 60);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
