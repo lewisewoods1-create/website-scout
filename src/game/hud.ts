@@ -5,6 +5,14 @@ const CSS = `
   text-shadow: 0 1px 3px rgba(0,0,0,.8); user-select: none; font-variant-numeric: tabular-nums; }
 #hud .vignette { position: absolute; inset: 0; opacity: 0; transition: opacity .15s;
   background: radial-gradient(ellipse at center, rgba(120,0,0,0) 35%, rgba(150,0,0,.55) 75%, rgba(90,0,0,.9) 100%); }
+#hud .scope { position: absolute; inset: 0; display: none;
+  background: radial-gradient(circle at center, transparent 0, transparent calc(min(46vh, 46vw)), rgba(0,0,0,.85) calc(min(46vh, 46vw) + 2px), #000 calc(min(46vh, 46vw) + 14px)); }
+#hud .scope::before { content: ''; position: absolute; left: 50%; top: 50%; width: calc(min(92vh, 92vw)); height: calc(min(92vh, 92vw)); transform: translate(-50%, -50%);
+  border-radius: 50%; box-shadow: inset 0 0 60px 18px rgba(0,0,0,.75); }
+#hud .scope svg { position: absolute; left: 50%; top: 50%; width: calc(min(92vh, 92vw)); height: calc(min(92vh, 92vw)); transform: translate(-50%, -50%); }
+#hud .scope .breath { position: absolute; left: 50%; bottom: 7vh; width: 160px; margin-left: -80px; height: 4px; background: rgba(255,255,255,.15); }
+#hud .scope .breath i { display: block; height: 100%; background: #f2ecd8; }
+#hud .scope .bh { position: absolute; left: 50%; bottom: calc(7vh + 10px); transform: translateX(-50%); font-size: 13px; letter-spacing: 2px; opacity: .8; }
 #hud .xhair { position: absolute; left: 50%; top: 50%; }
 #hud .xhair i { position: absolute; background: #f2ecd8; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
 #hud .xhair .t, #hud .xhair .b { width: 2px; height: 9px; left: -1px; }
@@ -39,8 +47,69 @@ const CSS = `
 #hud .banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .3s; }
 #hud .banner .t { font-size: 36px; color: #f2d36b; letter-spacing: 3px; }
 #hud .banner .s { font-size: 18px; }
-#hud .streak { position: absolute; right: 36px; bottom: 150px; font-size: 16px; text-align: right; }
-#hud .streak .ready { color: #9fd36b; animation: blink 1s infinite; }
+#hud .streak { position: absolute; right: 36px; bottom: 150px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#hud .sk-row { display: flex; gap: 6px; }
+#hud .sk { position: relative; width: 46px; height: 46px; border: 1px solid rgba(236,230,212,.3); background: rgba(0,0,0,.45); display: grid; place-items: center;
+  color: rgba(236,230,212,.45); overflow: hidden; }
+#hud .sk i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(242,211,107,.18); transition: height .3s; }
+#hud .sk svg { position: relative; }
+#hud .sk b { position: absolute; right: 3px; bottom: 1px; font-size: 13px; }
+#hud .sk em { position: absolute; left: 3px; top: 1px; font-style: normal; font-size: 12px; color: #f2d36b; }
+#hud .sk.got { border-color: #f2d36b; color: #f2d36b; box-shadow: 0 0 12px rgba(242,211,107,.45); }
+#hud .sk.got i { background: rgba(242,211,107,.28); }
+#hud .sk.top { animation: skPulse 1.1s ease-in-out infinite; }
+#hud .sk-use { font-size: 18px; letter-spacing: 1px; color: #f2d36b; }
+#hud .sk-use.dim { color: #9fd36b; }
+@keyframes skPulse { 50% { box-shadow: 0 0 22px rgba(242,211,107,.85); } }
+/* kill streak counter */
+#hud .kstreak { position: absolute; left: 50%; top: 66%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+#hud .kstreak div { font-size: 30px; letter-spacing: 3px; color: #ffcf5a; animation: kstreak 1.6s cubic-bezier(.2,.9,.3,1.2) forwards;
+  text-shadow: 0 0 14px rgba(255,140,40,.7), 0 2px 4px #000; }
+#hud .kstreak small { display: block; font-size: 14px; letter-spacing: 4px; color: #ece6d4; }
+@keyframes kstreak { 0% { transform: scale(2.2); opacity: 0; filter: blur(4px) } 14% { transform: scale(1); opacity: 1; filter: none }
+  80% { opacity: 1 } 100% { opacity: 0; transform: translateY(-14px) } }
+/* killstreak earned card */
+#hud .earn { position: absolute; right: 0; top: 34%; display: flex; align-items: center; gap: 16px; padding: 14px 40px 14px 22px;
+  background: linear-gradient(90deg, rgba(0,0,0,0), rgba(20,14,6,.88) 18%); border-right: 4px solid #f2d36b; transform: translateX(110%); }
+#hud .earn.show { animation: earnIn 3.4s cubic-bezier(.2,.9,.25,1) forwards; }
+#hud .earn .ic { color: #f2d36b; filter: drop-shadow(0 0 10px rgba(242,211,107,.8)); animation: earnIcon 3.4s ease-out forwards; }
+#hud .earn .k { font-size: 14px; letter-spacing: 4px; color: #9fd36b; }
+#hud .earn .n { font-size: 38px; letter-spacing: 2px; color: #f2d36b; line-height: 1; }
+#hud .earn .s { font-size: 15px; letter-spacing: 2px; }
+@keyframes earnIn { 0% { transform: translateX(110%) } 10% { transform: translateX(-8px) } 14% { transform: translateX(0) } 86% { transform: translateX(0); opacity: 1 } 100% { transform: translateX(40px); opacity: 0 } }
+@keyframes earnIcon { 0%, 10% { transform: scale(.4) rotate(-30deg) } 22% { transform: scale(1.25) rotate(6deg) } 32% { transform: none } }
+/* system crash */
+#hud .glitch { position: absolute; inset: 0; display: none; mix-blend-mode: screen; }
+#hud .glitch.on { display: block; animation: glitchShake .12s steps(2) infinite; }
+#hud .glitch::before { content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(255,0,80,.25) 0 3px, transparent 3px 9px), repeating-linear-gradient(90deg, rgba(0,255,220,.18) 0 40px, transparent 40px 97px);
+  animation: glitchBars .3s steps(3) infinite; }
+#hud .glitch div { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: 72px; letter-spacing: 8px; color: #fff;
+  text-shadow: -4px 0 #ff2a5a, 4px 0 #2ad4ff; }
+@keyframes glitchBars { 0% { transform: translateY(0) } 33% { transform: translateY(-17px) } 66% { transform: translateY(23px) } }
+@keyframes glitchShake { 0% { transform: translate(3px, -2px) } 100% { transform: translate(-4px, 3px) } }
+/* rank up */
+#hud .rankup { position: absolute; left: 50%; top: 38%; width: 0; height: 0; display: none; }
+#hud .rankup.show { display: block; }
+#hud .rankup .rays { position: absolute; left: -260px; top: -260px; width: 520px; height: 520px; border-radius: 50%;
+  background: repeating-conic-gradient(rgba(242,211,107,.22) 0 7deg, transparent 7deg 20deg);
+  -webkit-mask: radial-gradient(circle, #000 20%, transparent 68%); mask: radial-gradient(circle, #000 20%, transparent 68%);
+  animation: raysSpin 6s linear infinite, raysIn 4.2s ease-out forwards; }
+#hud .rankup .flash { position: absolute; left: -150px; top: -150px; width: 300px; height: 300px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,250,220,.95), rgba(255,220,120,0) 65%); animation: rkFlash 4.2s ease-out forwards; }
+#hud .rankup .bd { position: absolute; left: -64px; top: -64px; width: 128px; height: 128px; animation: rkBadge 4.2s cubic-bezier(.2,.9,.3,1.25) forwards; }
+#hud .rankup .bd img { width: 128px; height: 128px; }
+#hud .rankup .txt { position: absolute; left: -300px; width: 600px; top: 78px; text-align: center; animation: rkText 4.2s ease-out forwards; }
+#hud .rankup .k { font-size: 18px; letter-spacing: 8px; color: #9fd36b; }
+#hud .rankup .l { font-size: 56px; letter-spacing: 3px; color: #f2d36b; line-height: 1; text-shadow: 0 0 24px rgba(242,211,107,.6), 0 3px 6px #000; }
+#hud .rankup .r { font-size: 22px; letter-spacing: 3px; }
+#hud .rankup .u { font-size: 15px; letter-spacing: 1px; color: #ece6d4; opacity: .85; margin-top: 6px; }
+@keyframes raysSpin { to { transform: rotate(360deg) } }
+@keyframes raysIn { 0% { opacity: 0; scale: .3 } 15% { opacity: 1; scale: 1 } 82% { opacity: 1 } 100% { opacity: 0; scale: 1.15 } }
+@keyframes rkFlash { 0% { opacity: 0; scale: .2 } 8% { opacity: 1; scale: 1.4 } 30% { opacity: 0; scale: 2 } 100% { opacity: 0 } }
+@keyframes rkBadge { 0% { transform: scale(3.2) rotate(-25deg); opacity: 0 } 12% { transform: scale(.9) rotate(4deg); opacity: 1 } 20% { transform: none }
+  84% { transform: none; opacity: 1 } 100% { transform: translateY(-20px) scale(.9); opacity: 0 } }
+@keyframes rkText { 0%, 12% { opacity: 0; transform: translateY(14px) } 24% { opacity: 1; transform: none } 84% { opacity: 1 } 100% { opacity: 0 } }
 #hud .dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
 #hud .dmg i { position: absolute; left: -60px; top: -170px; width: 120px; height: 30px; border-radius: 50% 50% 0 0;
   border-top: 6px solid rgba(255,40,20,.85); opacity: 0; transition: opacity .6s; }
@@ -150,6 +219,13 @@ export class Hud {
   private equipEl: HTMLDivElement;
   private white: HTMLDivElement;
   private nadeEl: HTMLDivElement;
+  private scopeEl: HTMLDivElement;
+  private breathBar: HTMLElement;
+  private scopeOn = false;
+  private kstreak: HTMLDivElement;
+  private earn: HTMLDivElement;
+  private glitchEl: HTMLDivElement;
+  private rankEl: HTMLDivElement;
   private whiteT = 0;
   private hitT = 0;
   private bannerT = 0;
@@ -163,6 +239,15 @@ export class Hud {
     this.root.id = 'hud';
     this.vignette = el('div', 'vignette', this.root);
     this.dmg = el('div', 'dmg', this.root);
+    // mil-dot reticle: thick outer posts, fine centre cross, dots every 10 units
+    const dots = [-40, -30, -20, -10, 10, 20, 30, 40]
+      .map((d) => `<circle cx="${500 + d * 4}" cy="500" r="3.2"/><circle cx="500" cy="${500 + d * 4}" r="3.2"/>`)
+      .join('');
+    this.scopeEl = el('div', 'scope', this.root, `<svg viewBox="0 0 1000 1000" fill="#050505" stroke="#050505">
+      <rect x="0" y="494" width="300" height="12"/><rect x="700" y="494" width="300" height="12"/><rect x="494" y="700" width="12" height="300"/><rect x="494" y="0" width="12" height="300"/>
+      <line x1="300" y1="500" x2="700" y2="500" stroke-width="2"/><line x1="500" y1="300" x2="500" y2="700" stroke-width="2"/>${dots}</svg>
+      <div class="bh">SHIFT · HOLD BREATH</div><div class="breath"><i></i></div>`);
+    this.breathBar = this.scopeEl.querySelector('.breath i') as HTMLElement;
     this.xhair = el('div', 'xhair', this.root);
     this.xh = ['t', 'b', 'l', 'r'].map((c) => el('i', c, this.xhair));
     this.hit = el('div', 'hit', this.root);
@@ -180,6 +265,10 @@ export class Hud {
     this.popups = el('div', 'popups', this.root);
     this.banner = el('div', 'banner', this.root);
     this.streak = el('div', 'streak', this.root);
+    this.kstreak = el('div', 'kstreak', this.root);
+    this.earn = el('div', 'earn', this.root);
+    this.rankEl = el('div', 'rankup', this.root);
+    this.glitchEl = el('div', 'glitch', this.root, '<div>SYSTEM CRASH</div>');
     this.dead = el('div', 'dead', this.root, '<div class="t">K.I.A.</div><div class="s"></div><div class="cls"></div>');
     this.tagLayer = el('div', 'tags', this.root);
     this.match = el('div', 'match', this.root);
@@ -199,6 +288,15 @@ export class Hud {
 
   setVisible(v: boolean) {
     this.root.style.display = v ? '' : 'none';
+  }
+
+  /** Full-screen sniper scope with the hold-breath meter. */
+  scope(on: boolean, breath: number) {
+    if (on !== this.scopeOn) {
+      this.scopeOn = on;
+      this.scopeEl.style.display = on ? 'block' : 'none';
+    }
+    if (on) this.breathBar.style.width = `${Math.round(breath * 100)}%`;
   }
 
   crosshair(spreadPx: number, ads: number, hidden: boolean) {
@@ -266,8 +364,62 @@ export class Hud {
     this.bannerT = 0;
   }
 
-  streakInfo(html: string) {
-    this.streak.innerHTML = html;
+  private streakKey = '';
+  /** Killstreak rail; rebuilt only when its key changes. */
+  streakInfo(key: string, build: () => string) {
+    if (key === this.streakKey) return;
+    this.streakKey = key;
+    this.streak.innerHTML = build();
+  }
+
+  /** "3 KILL STREAK" pop under the crosshair. */
+  streakCount(n: number) {
+    this.kstreak.innerHTML = `<div>${n} KILL STREAK<small>${n >= 10 ? 'UNSTOPPABLE' : n >= 5 ? 'RAMPAGE' : 'KEEP GOING'}</small></div>`;
+  }
+
+  private earnQueue: [string, string, string][] = [];
+  private earnT = 0;
+  /** Killstreak ready: a card slides in from the right with the streak's icon. */
+  streakEarned(name: string, icon: string, sub = 'PRESS [4] TO CALL IN') {
+    if (this.earnT > 0) {
+      this.earnQueue.push([name, icon, sub]);
+      return;
+    }
+    this.earn.innerHTML = `<div class="ic">${icon}</div><div><div class="k">KILLSTREAK READY</div><div class="n">${name}</div><div class="s">${sub}</div></div>`;
+    this.earn.classList.remove('show');
+    void this.earn.offsetWidth; // restart the animation
+    this.earn.classList.add('show');
+    this.earnT = 3.4;
+  }
+
+  glitch(on: boolean) {
+    this.glitchEl.classList.toggle('on', on);
+  }
+
+  private rankQueue: [string, string, string, string][] = [];
+  private rankT = 0;
+  /** Promotion: rays, flash, the new badge slamming in, then level, rank and unlocks. */
+  rankUp(badge: string, level: string, rank: string, unlocks: string) {
+    if (this.rankT > 0) {
+      this.rankQueue.push([badge, level, rank, unlocks]);
+      return;
+    }
+    this.rankEl.innerHTML = `<div class="rays"></div><div class="flash"></div><div class="bd">${badge}</div>
+      <div class="txt"><div class="k">PROMOTED</div><div class="l">${level}</div><div class="r">${rank}</div>${unlocks ? `<div class="u">UNLOCKED · ${unlocks}</div>` : ''}</div>`;
+    this.rankEl.classList.remove('show');
+    void this.rankEl.offsetWidth;
+    this.rankEl.classList.add('show');
+    this.rankT = 4.2;
+  }
+
+  clearOverlays() {
+    this.earnQueue = [];
+    this.rankQueue = [];
+    this.earnT = this.rankT = 0;
+    this.earn.classList.remove('show');
+    this.rankEl.classList.remove('show');
+    this.glitchEl.classList.remove('on');
+    this.kstreak.innerHTML = '';
   }
 
   damageFrom(angle: number) {
@@ -373,6 +525,17 @@ export class Hud {
     this.hit.style.opacity = this.hitT > 0 ? '1' : '0';
     this.whiteT = Math.max(0, this.whiteT - dt);
     this.white.style.opacity = String(Math.min(1, this.whiteT));
+    if (this.earnT > 0) {
+      this.earnT -= dt;
+      if (this.earnT <= 0 && this.earnQueue.length) this.streakEarned(...this.earnQueue.shift()!);
+    }
+    if (this.rankT > 0) {
+      this.rankT -= dt;
+      if (this.rankT <= 0) {
+        this.rankEl.classList.remove('show');
+        if (this.rankQueue.length) this.rankUp(...this.rankQueue.shift()!);
+      }
+    }
     this.bannerT -= dt;
     if (this.bannerT <= 0 && this.bannerQueue.length) {
       const [t, s, secs] = this.bannerQueue.shift()!;

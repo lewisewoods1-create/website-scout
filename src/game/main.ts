@@ -4,7 +4,7 @@ import { loadClasses } from './loadout';
 import { startBadgeAnimation } from './badges';
 
 const SETTINGS_KEY = 'deadpixel.settings.v1';
-const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 480, volume: 0.7, unlockAll: false };
+const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 480, volume: 0.7, music: 0.5, unlockAll: false };
 
 function loadSettings(): Settings {
   try {

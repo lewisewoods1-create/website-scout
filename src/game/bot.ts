@@ -3,7 +3,17 @@ import type { GameMap } from './map';
 import { raycastBoxes } from './map';
 import type { Effects } from './effects';
 import type { Sfx } from './audio';
-import { HEADSHOT_MULT, type WeaponId } from './loadout';
+import { HEADSHOT_MULT, WEAPONS, type HitZone, type WeaponClassId, type WeaponId } from './loadout';
+
+/** Bot fire cadence (seconds between shots) and damage per hit, by weapon class. */
+const BOT_GUN: Record<WeaponClassId, { rate: number; vsPlayer: [number, number]; vsBot: number }> = {
+  ar: { rate: 0.085, vsPlayer: [11, 17], vsBot: 29 },
+  smg: { rate: 0.065, vsPlayer: [8, 13], vsBot: 23 },
+  heavy: { rate: 0.095, vsPlayer: [13, 19], vsBot: 36 },
+  marksman: { rate: 0.32, vsPlayer: [24, 32], vsBot: 52 },
+  sniper: { rate: 1.2, vsPlayer: [45, 60], vsBot: 100 },
+  handgun: { rate: 0.2, vsPlayer: [12, 18], vsBot: 30 },
+};
 import { LAYER_CHAR, LAYER_FX } from './renderer';
 import { blobShadowTex, flashTex } from './textures';
 import { clamp, damp, setLayerDeep } from './util';
@@ -54,6 +64,7 @@ export interface HitSphere {
   c: THREE.Vector3;
   r: number;
   head: boolean;
+  zone: HitZone;
 }
 
 type State = 'patrol' | 'hunt' | 'engage';
@@ -108,16 +119,25 @@ export class Bot implements Combatant {
   lastShotT = -99;
   lastDamagedT = -99;
   readonly spheres: HitSphere[] = [
-    { c: new THREE.Vector3(), r: 0.15, head: true },
-    { c: new THREE.Vector3(), r: 0.25, head: false },
-    { c: new THREE.Vector3(), r: 0.23, head: false },
-    { c: new THREE.Vector3(), r: 0.15, head: false },
-    { c: new THREE.Vector3(), r: 0.15, head: false },
-    { c: new THREE.Vector3(), r: 0.13, head: false },
-    { c: new THREE.Vector3(), r: 0.13, head: false },
+    { c: new THREE.Vector3(), r: 0.15, head: true, zone: 'head' },
+    { c: new THREE.Vector3(), r: 0.25, head: false, zone: 'upper' },
+    { c: new THREE.Vector3(), r: 0.23, head: false, zone: 'lower' },
+    { c: new THREE.Vector3(), r: 0.15, head: false, zone: 'limb' },
+    { c: new THREE.Vector3(), r: 0.15, head: false, zone: 'limb' },
+    { c: new THREE.Vector3(), r: 0.13, head: false, zone: 'limb' },
+    { c: new THREE.Vector3(), r: 0.13, head: false, zone: 'limb' },
+    // upper arms, just outside the chest sphere
+    { c: new THREE.Vector3(), r: 0.08, head: false, zone: 'limb' },
+    { c: new THREE.Vector3(), r: 0.08, head: false, zone: 'limb' },
   ];
 
   private target: Combatant | null = null;
+  /** who hurt this bot this life, and when (assists, finishing blows) */
+  readonly hurtBy = new Map<number, number>();
+  /** the combatant this bot is currently fighting */
+  get currentTarget() {
+    return this.target;
+  }
   private attacker: Combatant | null = null;
   private path: THREE.Vector3[] = [];
   private lastSeen = new THREE.Vector3();
@@ -199,6 +219,7 @@ export class Bot implements Combatant {
     this.path = [];
     this.deadT = 0;
     this.target = null;
+    this.hurtBy.clear();
     this.attacker = null;
     this.trackT = 0;
     this.model.rotation.x = 0;
@@ -217,6 +238,7 @@ export class Bot implements Combatant {
     if (!this.alive) return false;
     this.health -= amount;
     this.lastDamagedT = now;
+    this.hurtBy.set(attacker.id, now);
     this.attacker = attacker;
     this.lastSeen.copy(attacker.pos);
     this.lastSeenT = now;
@@ -403,7 +425,7 @@ export class Bot implements Combatant {
     if (this.reactT > 0 || yawErr > 0.25 || this.fireCool > 0) return;
     if (this.burst <= 0) this.burst = 3 + Math.floor(Math.random() * 4);
     this.burst--;
-    const rate = this.weapon === 'vk47' ? 0.105 : 0.085;
+    const rate = this.weapon === 'vk47' ? 0.105 : BOT_GUN[WEAPONS[this.weapon].cls].rate;
     this.fireCool = this.burst > 0 ? rate : 0.4 + Math.random() * 0.6;
     this.shoot(w, t, dist);
   }
@@ -437,7 +459,8 @@ export class Bot implements Combatant {
     w.shotFired(this, false);
     if (hit) {
       const head = !t.isPlayer && Math.random() < 0.15;
-      const base = t.isPlayer ? 11 + Math.random() * 6 : this.weapon === 'vk47' ? 36 : 29;
+      const g = BOT_GUN[WEAPONS[this.weapon].cls];
+      const base = t.isPlayer ? g.vsPlayer[0] + Math.random() * (g.vsPlayer[1] - g.vsPlayer[0]) : this.weapon === 'vk47' ? 36 : g.vsBot;
       const dir = target.clone().sub(from).normalize();
       w.hit(t, Math.round(base * w.difficulty.damage * (head ? HEADSHOT_MULT : 1)), this, head, dir);
     } else if (t.isPlayer && Math.random() < 0.4) {
@@ -487,6 +510,8 @@ export class Bot implements Combatant {
     sp[4].c.set(p.x - rx * 0.1, p.y + 0.72, p.z - rz * 0.1);
     sp[5].c.set(p.x + rx * 0.1, p.y + 0.32, p.z + rz * 0.1);
     sp[6].c.set(p.x - rx * 0.1, p.y + 0.32, p.z - rz * 0.1);
+    sp[7].c.set(p.x + rx * 0.31, p.y + 1.3, p.z + rz * 0.31);
+    sp[8].c.set(p.x - rx * 0.31, p.y + 1.3, p.z - rz * 0.31);
   }
 
   private updateDead(dt: number, w: BotWorld) {

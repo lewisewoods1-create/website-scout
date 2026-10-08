@@ -1,3 +1,4 @@
+import { DEFAULT_STREAKS, STREAKS, type StreakId } from './killstreaks';
 /**
  * Ranks 1-75, then Prestige 1-10 (each prestige resets you to level 1).
  * XP needed per level grows linearly; the profile is stored locally for now.
@@ -53,6 +54,8 @@ export interface Profile {
   stats: Record<string, number>;
   /** ids of completed challenges */
   challenges: string[];
+  /** the three killstreaks picked in Create a Class */
+  streaks: StreakId[];
   callsign: string;
   banner: string;
   look: SoldierLook;
@@ -62,7 +65,7 @@ const KEY = 'deadpixel.profile.v1';
 
 export function blankProfile(): Profile {
   return {
-    xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {}, weaponHeads: {}, stats: {}, challenges: [],
+    xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {}, weaponHeads: {}, stats: {}, challenges: [], streaks: [...DEFAULT_STREAKS],
     callsign: 'OPERATOR', banner: 'recruit', look: { uniform: 'desert', gear: 'coyote', head: 'nvg' },
   };
 }
@@ -78,6 +81,7 @@ export function loadProfile(): Profile {
     p.weaponHeads = { ...p.weaponHeads };
     p.stats = { ...p.stats };
     p.challenges = Array.isArray(p.challenges) ? [...p.challenges] : [];
+    p.streaks = Array.isArray(p.streaks) && p.streaks.length === 3 && p.streaks.every((s) => s in STREAKS) ? [...p.streaks] : [...DEFAULT_STREAKS];
     p.xp = Math.min(p.xp, xpForLevel(MAX_LEVEL));
     return p;
   } catch {

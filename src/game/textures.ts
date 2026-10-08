@@ -513,7 +513,7 @@ export function woodTex(seed = 71) {
   return hires(c);
 }
 
-export type CamoId = 'none' | 'desert' | 'woodland' | 'urban' | 'arctic' | 'crimson' | 'gold' | 'obsidian' | 'prism';
+export type CamoId = 'none' | 'desert' | 'woodland' | 'urban' | 'arctic' | 'crimson' | 'gold' | 'obsidian' | 'prism' | 'neon' | 'magma' | 'void' | 'circuit';
 
 /** Weapon camo maps (painted finishes, not fabric). */
 export function weaponCamoTex(id: CamoId) {
@@ -528,6 +528,10 @@ export function weaponCamoTex(id: CamoId) {
     arctic: ['#dfe7ec', '#9fb2c0', '#f6f8fa', '#5f7383'],
     obsidian: ['#0d0a12', '#1c1228', '#06050a', '#2b1840'],
     prism: ['#7fd6e8'],
+    neon: ['#0b0614'],
+    magma: ['#1a0604'],
+    void: ['#05030c'],
+    circuit: ['#06231a'],
   };
   const p = pal[id] ?? pal.desert;
   ctx.fillStyle = p[0];
@@ -607,6 +611,73 @@ export function weaponCamoTex(id: CamoId) {
           ctx.fill();
         }
       }
+    }
+  } else if (id === 'neon') {
+    // synthwave grid in hot pink and cyan
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 512; i += 32) {
+      ctx.strokeStyle = 'rgba(255,63,210,0.85)';
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 512);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(40,220,255,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(512, i);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = rnd() < 0.5 ? '#ff3fd2' : '#28dcff';
+      ctx.fillRect(Math.floor(rnd() * 16) * 32 + 2, Math.floor(rnd() * 16) * 32 + 2, 28, 28);
+    }
+  } else if (id === 'magma') {
+    // cooled black crust over glowing cracks
+    for (let i = 0; i < 60; i++) {
+      ctx.strokeStyle = `hsl(${10 + rnd() * 30} 100% ${45 + rnd() * 20}%)`;
+      ctx.lineWidth = 1.5 + rnd() * 4;
+      let x = rnd() * 512;
+      let y = rnd() * 512;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 6; k++) {
+        x += (rnd() - 0.5) * 70;
+        y += (rnd() - 0.5) * 70;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  } else if (id === 'void') {
+    // deep space: violet nebula, star field
+    for (let i = 0; i < 18; i++) {
+      const g = ctx.createRadialGradient(rnd() * 512, rnd() * 512, 0, rnd() * 512, rnd() * 512, 60 + rnd() * 120);
+      g.addColorStop(0, `hsla(${250 + rnd() * 60}, 70%, 40%, 0.35)`);
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 512, 512);
+    }
+    for (let i = 0; i < 400; i++) {
+      ctx.fillStyle = `rgba(255,255,255,${0.3 + rnd() * 0.7})`;
+      ctx.fillRect(rnd() * 512, rnd() * 512, rnd() < 0.1 ? 2 : 1, rnd() < 0.1 ? 2 : 1);
+    }
+  } else if (id === 'circuit') {
+    // PCB traces and pads in green and copper
+    ctx.lineCap = 'square';
+    for (let i = 0; i < 90; i++) {
+      ctx.strokeStyle = rnd() < 0.8 ? '#19c48a' : '#c98a4a';
+      ctx.lineWidth = rnd() < 0.7 ? 3 : 6;
+      let x = Math.floor(rnd() * 32) * 16;
+      let y = Math.floor(rnd() * 32) * 16;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 3; k++) {
+        if (rnd() < 0.5) x += (rnd() < 0.5 ? -1 : 1) * 16 * (1 + Math.floor(rnd() * 4));
+        else y += (rnd() < 0.5 ? -1 : 1) * 16 * (1 + Math.floor(rnd() * 4));
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = '#c9a24a';
+      ctx.fillRect(x - 5, y - 5, 10, 10);
     }
   } else if (id === 'gold') {
     const g = ctx.createLinearGradient(0, 0, 512, 512);

@@ -1,7 +1,7 @@
 import type { Choice } from './loadout';
 import { MAX_LEVEL, xpForLevel, levelForXp, type Profile } from './progression';
 import { badgeImg, rankInfo } from './badges';
-import { BANNER_ART_EXT, BANNER_ART_READY, CATEGORIES, CHALLENGES } from './challenges';
+import { CHALLENGES, cardArt } from './challenges';
 
 /**
  * Banners (calling cards), soldier looks and the player card.
@@ -15,6 +15,8 @@ export interface Banner {
   prestige?: number;
   /** unlocked by completing this challenge id */
   challenge?: string;
+  /** calling-card artwork (title is drawn into the art) */
+  art?: string;
   bg: string;
   motif?: string;
 }
@@ -43,21 +45,13 @@ export const BANNERS: Banner[] = [
     bg: `linear-gradient(115deg, hsl(${(i * 36 + 200) % 360} 50% 12%), hsl(${(i * 36 + 200) % 360} 60% 32%) 60%, hsl(${(i * 36 + 220) % 360} 70% 50%))`,
     motif: star,
   })),
-  ...CHALLENGES.map((c): Banner => {
-    const cat = CATEGORIES[c.cat];
-    const h = cat.hue;
-    const num = String(c.n).padStart(3, '0');
-    // placeholder until the artwork pack lands: category colour, brighter per tier, numbered
-    const art = BANNER_ART_READY ? `url(banners/ch-${num}.${BANNER_ART_EXT}) center/cover, ` : '';
-    const sheen = `repeating-linear-gradient(115deg, rgba(255,255,255,${0.02 + c.tier * 0.015}) 0 6px, transparent 6px ${14 + c.tier * 4}px)`;
-    return {
-      id: `ch${num}`,
-      name: c.name,
-      challenge: c.id,
-      bg: `${art}${sheen}, linear-gradient(115deg, hsl(${h} 45% 9%), hsl(${h} 55% ${18 + c.tier * 5}%) 60%, hsl(${h} 70% ${32 + c.tier * 6}%))`,
-      motif: BANNER_ART_READY ? undefined : `<svg viewBox="0 0 40 40"><path fill="hsl(${h} 80% 72% / .8)" d="${cat.icon}"/></svg>`,
-    };
-  }),
+  ...CHALLENGES.map((c): Banner => ({
+    id: c.id,
+    name: c.name,
+    challenge: c.id,
+    art: cardArt(c.id),
+    bg: `url(${cardArt(c.id)}) center / 100% 100% no-repeat, #111`,
+  })),
 ];
 
 export function bannerUnlocked(b: Banner, level: number, prestige: number, all = false, done: string[] = []) {
@@ -105,6 +99,16 @@ export function playerCard(p: Profile, opts: { compact?: boolean } = {}) {
   const need = level >= MAX_LEVEL ? 1 : xpForLevel(level + 1) - base;
   const pct = level >= MAX_LEVEL ? 100 : Math.min(100, ((p.xp - base) / need) * 100);
   const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+  if (b.art) {
+    // calling card: keep the artwork (and its title) clear, name strip underneath
+    return `<div class="pcard art ${opts.compact ? 'compact' : ''}">
+      <div class="pc-art" style="background:${b.bg}"></div>
+      <div class="pc-strip"><div class="pc-badge">${badge(level, p.prestige, opts.compact ? 34 : 40)}</div>
+        <div class="pc-text"><div class="pc-name">${esc(p.callsign)}</div>
+        <div class="pc-rank">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LVL ${level} · ${rankInfo(level).name.toUpperCase()}</div></div></div>
+      <div class="pc-bar"><i style="width:${pct}%"></i></div>
+    </div>`;
+  }
   return `<div class="pcard ${opts.compact ? 'compact' : ''}" style="background:${b.bg}">
     ${b.motif ? `<div class="pc-motif">${b.motif}</div>` : ''}
     <div class="pc-badge">${badge(level, p.prestige, opts.compact ? 52 : 68)}</div>

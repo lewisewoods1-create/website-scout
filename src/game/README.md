@@ -20,7 +20,7 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 |---|---|
 | `game.ts` | Orchestrates player, gun, bots, XP and HUD; handles shooting and damage |
 | `map.ts` / `maps.ts` | Map builder (merged, textured box geometry), AABB colliders, 1m nav grid + A*, ray vs box; map pool with themes |
-| `weapons.ts` | Procedural KR-4 (AR) and VK-47 (AK), 150–250 parts each, with optics, suppressor, foregrip and camos |
+| `weapons.ts` | 14 procedural guns (assault, SMG, heavy, marksman, sniper, handguns), 150–350 parts each, with optics incl. a sniper scope, muzzles, grips and camos |
 | `loadout.ts`, `menu.ts` | Create-a-class data and stats; menus, class editor and 3D preview |
 | `hands.ts` | Gloved hands with articulated fingers, attached to the rifle |
 | `soldier.ts` | Fully kitted operator: plate carrier, MOLLE, pouches, helmet + NVG, IK arms |
@@ -28,10 +28,12 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | `bot.ts` | AI states patrol → engage → hunt; reaction time, strafing, burst fire, accuracy model |
 | `player.ts` | Movement: sprint, crouch, slide, jump, step-up, health regen |
 | `progression.ts`, `unlocks.ts` | Levels 1–75 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
-| `challenges.ts` | 100 challenges over profile stat counters; each pays XP and unlocks its own banner |
+| `challenges.ts` | 100 challenges, one per calling card (20 themes x 5 tiers) over profile stat counters |
+| `killstreaks.ts` | Killstreak roster and runtime: supply drop, mortar, sentry, airstrike, drone, System Crash |
 | `cosmetics.ts`, `badges.ts` | Banners, soldier looks, player card; rank/prestige badges from the badge pack generator in `vendor/` |
 | `throwables.ts` | Frag, smoke and stun grenades: bounce physics, fuses, smoke that blocks vision |
-| `hud.ts`, `audio.ts`, `effects.ts`, `textures.ts`, `materials.ts` | HUD, synthesised SFX, low-res FX, procedural textures, PBR materials |
+| `audio.ts` | Synthesised SFX plus a sequenced score: menu synthwave loop, in-match tension bed, countdown and promotion stings |
+| `hud.ts`, `effects.ts`, `textures.ts`, `materials.ts` | HUD, low-res FX, procedural textures, PBR materials |
 
 ## Roadmap
 

@@ -75,6 +75,9 @@ interface Built {
   cylinder: THREE.Object3D | null;
   crane: THREE.Object3D | null;
   hammer: THREE.Object3D | null;
+  /** bolt-action bolt (rotates up about Z, slides back along +Z) */
+  bolt: THREE.Object3D | null;
+  boltHome: THREE.Vector3;
 }
 
 /** First-person gun + gloved hands, rendered at full res in its own scene. */
@@ -90,6 +93,7 @@ export class Viewmodel {
   private switchT = -1;
   private pending: (() => void) | null = null;
   private throwT = -1;
+  private meleeT = -1;
   private throwRig = new THREE.Group();
   private throwR!: THREE.Group;
   private throwL!: THREE.Group;
@@ -125,6 +129,11 @@ export class Viewmodel {
   private land = 0;
   /** -1 when idle, else 0..1 reload progress */
   reload = -1;
+  /** hide the gun (full-screen sniper scope) */
+  hidden = false;
+  /** bolt cycle progress after a shot, -1 when closed */
+  private boltT = -1;
+  private boltDur = 1;
   reloadEmpty = false;
 
   constructor(m: Materials, env: THREE.Texture) {
@@ -237,6 +246,8 @@ export class Viewmodel {
       cylinder: rifle.getObjectByName('cylinder') ?? null,
       crane: rifle.getObjectByName('cylinderSwing') ?? null,
       hammer: rifle.getObjectByName('hammer') ?? null,
+      bolt: rifle.getObjectByName('bolt') ?? null,
+      boltHome: rifle.getObjectByName('bolt')?.position.clone() ?? new THREE.Vector3(),
     };
     this.cache.set(key, b);
     return b;
@@ -329,7 +340,12 @@ export class Viewmodel {
 
   /** True while switching or throwing: can't fire or aim. */
   get busy() {
-    return this.switchT >= 0 || this.throwT >= 0;
+    return this.switchT >= 0 || this.throwT >= 0 || this.meleeT >= 0;
+  }
+
+  /** Gun-butt strike: swing the weapon across and forward. */
+  melee() {
+    this.meleeT = 0;
   }
 
   get kind() {
@@ -339,6 +355,12 @@ export class Viewmodel {
   setAspect(a: number) {
     this.camera.aspect = a;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Bolt-action: work the bolt over `secs` after the shot. */
+  cycleBolt(secs: number) {
+    this.boltT = 0;
+    this.boltDur = secs;
   }
 
   fire() {
@@ -412,6 +434,11 @@ export class Viewmodel {
       if (this.throwT >= 1) this.cancelThrow();
     }
     this.slideKick = damp(this.slideKick, 0, 28, dt);
+    if (this.boltT >= 0) {
+      this.boltT += dt / this.boltDur;
+      if (this.boltT >= 1) this.boltT = -1;
+    }
+    this.root.visible = !this.hidden;
     this.cylAngle = damp(this.cylAngle, this.cylTarget, 18, dt);
 
     const pose = this.w.kind === 'rifle' ? POSES.rifle : POSES.pistol;
@@ -433,6 +460,20 @@ export class Viewmodel {
     r.x = -lower * 0.6 + this.kickPitch + this.sway.y + Math.sin(this.bob * 2) * 0.008 * bobK - this.land * 0.05;
     r.y = this.kickYaw + this.sway.x + this.sprint * 0.75 * (1 - this.ads);
     r.z = this.kickRoll + Math.sin(this.bob) * 0.02 * bobK + this.sprint * 0.35 * (1 - this.ads);
+    if (this.meleeT >= 0) {
+      this.meleeT += dt / 0.5;
+      const t = Math.min(1, this.meleeT);
+      // wind back right, then drive the butt forward-left, recover
+      const wind = smooth(clamp(t / 0.2, 0, 1)) * (1 - smooth(clamp((t - 0.2) / 0.12, 0, 1)));
+      const strike = smooth(clamp((t - 0.2) / 0.12, 0, 1)) * (1 - smooth(clamp((t - 0.45) / 0.55, 0, 1)));
+      p.x += wind * 0.06 - strike * 0.12;
+      p.z += wind * 0.05 - strike * 0.16;
+      p.y += strike * 0.05;
+      r.y += wind * 0.3 - strike * 0.9;
+      r.z += -strike * 0.6;
+      r.x += strike * 0.2;
+      if (this.meleeT >= 1) this.meleeT = -1;
+    }
 
     this.animateReload();
 
@@ -466,6 +507,21 @@ export class Viewmodel {
     if (w.cylinder) w.cylinder.rotation.z = this.cylAngle;
     if (w.hammer) w.hammer.rotation.x = -Math.min(0.6, Math.abs(this.cylTarget - this.cylAngle) * 2);
     if (w.kind === 'pistol' && w.charging) w.charging.position.z += this.slideKick * 0.024 + (this.slideLocked ? 0.024 : 0);
+    if (w.bolt) {
+      // lift, pull back, push forward, lock down; the right hand leaves the grip to do it
+      w.bolt.position.copy(w.boltHome);
+      w.bolt.rotation.z = 0;
+      const t = this.boltT;
+      if (t >= 0) {
+        const lift = smooth(clamp((t - 0.15) / 0.15, 0, 1)) * (1 - smooth(clamp((t - 0.75) / 0.15, 0, 1)));
+        const back = smooth(clamp((t - 0.3) / 0.18, 0, 1)) * (1 - smooth(clamp((t - 0.52) / 0.2, 0, 1)));
+        w.bolt.rotation.z = lift * 1.05;
+        w.bolt.position.z += back * 0.085;
+        const env = smooth(clamp(t / 0.15, 0, 1)) * (1 - smooth(clamp((t - 0.85) / 0.15, 0, 1)));
+        w.rifle.rotation.z = -0.22 * env;
+        w.rifle.rotation.x = 0.06 * env;
+      }
+    }
 
     if (t >= 0) {
       const env = smooth(clamp(t / 0.14, 0, 1)) * smooth(clamp((1 - t) / 0.16, 0, 1));

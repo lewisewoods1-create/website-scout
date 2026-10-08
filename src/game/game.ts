@@ -14,12 +14,13 @@ import { Hud, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
-import { CAMOS, classOf, computeStats, hasMastery, HEADSHOT_MULT, isUnlocked, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type WeaponId } from './loadout';
+import { CAMOS, classOf, computeStats, hasGold, hasMastery, isUnlocked, type HitZone, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type PrimaryId, type WeaponId } from './loadout';
 import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
 import { nextUnlock, unlockTrack } from './unlocks';
-import { badgeThumb, thumbVersion } from './badges';
+import { badgeImg, badgeThumb, rankInfo, thumbVersion } from './badges';
 import { playerCard } from './cosmetics';
 import { bump, bumpMax, checkChallenges } from './challenges';
+import { STREAKS, StreakRuntime, streakIcon, type StreakId } from './killstreaks';
 import { clamp, damp, lerp } from './util';
 
 export interface Settings {
@@ -28,6 +29,8 @@ export interface Settings {
   dither: boolean;
   lowHeight: number;
   volume: number;
+  /** music bus, 0..1 */
+  music: number;
   unlockAll: boolean;
 }
 
@@ -55,7 +58,6 @@ export const MODES: Record<Mode, { label: string; desc: string; scoreLimit: numb
 
 const MAX_BOTS = 11;
 const ATTRACT_BOTS = 8;
-const SWEEP_STREAK = 3;
 const SWEEP_TIME = 30;
 const ALLY = '#7ec8ff';
 const ENEMY = '#ff5a3a';
@@ -130,10 +132,44 @@ export class Game {
   private timeLeft = 0;
   private matchXp = 0;
   private streak = 0;
+  /** sniper hold-breath meter (1 = full) and sway clock */
+  private breath = 1;
+  private swayT = 0;
+  /** per-match / per-life state behind the challenge counters */
+  private ms = Game.freshMatchStats();
+  private lifeKills = new Map<number, number>();
+  private static freshMatchStats() {
+    return {
+      headRun: 0,
+      lifeWeapons: new Set<string>(),
+      stillT: 0,
+      lastSprintT: -99,
+      crouchTaps: [] as number[],
+      spawnT: 0,
+      lastKillPos: null as THREE.Vector3 | null,
+      killTimes: [] as number[],
+      deathTimes: [] as number[],
+      deathRun: 0,
+      deathsBy: new Map<number, number>(),
+      reloaded: false,
+      noReloadDone: false,
+      sprinted: false,
+      trailingAtHalf: false,
+      halfChecked: false,
+      lowHp: false,
+      lastKiller: null as Combatant | null,
+      statT: 0,
+    };
+  }
+  /** details of the hit that's about to be registered (for challenge tracking) */
+  private killCtx: { preHealth: number; zone: HitZone } | null = null;
   /** multi-kill tracking: time of the last kill and how many in the chain */
   private lastKillT = -99;
   private multi = 0;
-  private sweepReady = false;
+  /** earned, unused killstreaks (newest last) */
+  private earned: StreakId[] = [];
+  private streakRt!: StreakRuntime;
+  private crashT = -1;
   private sweepT = 0;
   private now = 0;
   private respawnT = 0;
@@ -214,6 +250,30 @@ export class Game {
     this.vm = new Viewmodel(mats, env);
     this.guns = [new Gun(computeStats(this.classes[0])), new Gun(computeStats(this.classes[0], 'secondary'))];
     this.throwables = new Throwables<Combatant>(this.scene, mats);
+    this.streakRt = new StreakRuntime({
+      scene: this.scene,
+      mats,
+      effects: this.effects,
+      sfx: this.sfx,
+      now: () => this.now,
+      playerFeet: () => this.player.pos.clone(),
+      playerYaw: () => this.player.yaw,
+      playerAlive: () => this.player.alive,
+      enemies: () => this.bots.filter((b) => b.active && b.alive && this.hostile(this.agent, b)),
+      clear: (a, b) => {
+        const d = b.clone().sub(a);
+        const len = d.length();
+        return !raycastBoxes(this.map.boxes, a, d.divideScalar(len), len);
+      },
+      explode: (pos, label, radius, damage) => this.explode(pos, this.agent, radius, damage, label),
+      shoot: (from, bot, damage, label) => {
+        this.effects.tracer(from, bot.spheres[1].c);
+        this.effects.blood(bot.spheres[1].c, bot.spheres[1].c.clone().sub(from).normalize(), false);
+        if (bot.damage(damage, this.agent, this.now)) this.registerKill(this.agent, bot, false, STREAKS[label].name, `streak_${label}`);
+      },
+      pan: (pos) => ({ dist: pos.distanceTo(this.camera.position), pan: panFor(pos, this.camera.position, this.camera.rotation.y) }),
+      resupply: () => this.resupply(),
+    });
 
     const sm = soldierMaterials(mats);
     this.soldierMats = sm;
@@ -222,9 +282,11 @@ export class Game {
       { uniform: 'desert', gear: 'coyote', head: 'nvg' },
       { uniform: 'woodland', gear: 'ranger', head: 'helmet' },
     ];
+    // bots carry assault rifles mostly, plus SMGs, LMGs and marksman rifles for variety
+    const botGuns: PrimaryId[] = ['kr4', 'vk47', 'vx9', 'lm5', 'sk10'];
     for (const variant of [0, 1] as const) {
-      for (const weapon of ['kr4', 'vk47'] as const) {
-        const cfg: WeaponCfg = { weapon, optic: opt[(variant + (weapon === 'kr4' ? 2 : 0)) % 3], muzzle: 'none', under: weapon === 'kr4' ? 'grip' : 'none', mag: 'std', camo: 'none' };
+      for (const weapon of botGuns) {
+        const cfg: WeaponCfg = { weapon, optic: opt[(variant + botGuns.indexOf(weapon)) % 3], muzzle: 'none', under: weapon === 'kr4' ? 'grip' : 'none', mag: 'std', camo: 'none' };
         const t = buildSoldier(sm, looks[variant], cfg);
         t.userData.weapon = weapon;
         t.userData.variant = variant;
@@ -263,6 +325,7 @@ export class Game {
     this.renderer.lowHeight = s.lowHeight;
     this.renderer.setDither(s.dither);
     this.sfx.setVolume(s.volume);
+    this.sfx.setMusicVolume(s.music);
     this.resize();
   }
 
@@ -361,6 +424,9 @@ export class Game {
   /** Menu background: bots fight each other while the camera orbits. */
   startAttract() {
     this.throwables.clear();
+    this.streakRt.clear();
+    this.hud.clearOverlays();
+    this.sfx.music('menu');
     this.phase = 'attract';
     this.choosingClass = false;
     this.pregame = 'off';
@@ -395,10 +461,17 @@ export class Game {
     this.teamScore = [0, 0];
     this.timeLeft = MODES[cfg.mode].minutes * 60;
     this.matchXp = 0;
+    this.sfx.music('match');
+    this.hud.clearOverlays();
+    this.ms = Game.freshMatchStats();
+    this.lifeKills.clear();
+    bump(this.profile, `played_${cfg.mapId}`);
     this.streak = 0;
     this.multi = 0;
     this.lastKillT = -99;
-    this.sweepReady = false;
+    this.earned = [];
+    this.crashT = -1;
+    this.streakRt.clear();
     this.sweepT = 0;
     this.killedBy = '';
     this.world.difficulty = DIFFICULTIES[cfg.difficulty];
@@ -416,7 +489,10 @@ export class Game {
       const ally = cfg.mode === 'tdm' && i < 5;
       b.team = cfg.mode === 'tdm' ? (ally ? 0 : 1) : 100 + i;
       const variant = cfg.mode === 'tdm' ? (ally ? 0 : 1) : i % 2;
-      b.dress(this.templates[variant * 2 + (Math.random() < 0.5 ? 0 : 1)]);
+      const pool = this.templates.filter((t) => t.userData.variant === variant);
+      // weight the rifles: half the bots get one, the rest spread over the others
+      const rifles = pool.filter((t) => WEAPONS[t.userData.weapon as WeaponId].cls === 'ar');
+      b.dress(Math.random() < 0.5 ? rifles[Math.floor(Math.random() * rifles.length)] : pool[Math.floor(Math.random() * pool.length)]);
       // flavour ranks for the scoreboard
       b.prestige = Math.random() < 0.25 ? 1 + Math.floor(Math.random() * 4) : 0;
       b.level = 1 + Math.floor(Math.random() * MAX_LEVEL);
@@ -443,7 +519,7 @@ export class Game {
   private classCards(): [string, string][] {
     return this.classes.map((c) => {
       const s = computeStats(c);
-      const opt = { iron: 'Iron sights', reflex: 'Reflex', holo: 'Holographic', acog: '4x scope' }[c.optic];
+      const opt = { iron: 'Iron sights', reflex: 'Reflex', holo: 'Holographic', acog: '4x scope', sniper: 'Sniper scope' }[c.optic];
       const extras = [opt, c.muzzle === 'suppressor' ? 'Suppressor' : '', c.under === 'grip' ? 'Foregrip' : ''].filter(Boolean).join(' · ');
       return [c.name, `${s.name} · ${WEAPONS[c.secondary].name}<br>${extras}`];
     });
@@ -515,6 +591,12 @@ export class Game {
     this.startAttract();
   }
 
+  /** Perk and weapon weight both scale move speed. */
+  private updateMove() {
+    const l = this.classes[this.classIdx];
+    this.player.speedMult = (l.perk1 === 'fleet' ? 1.1 : 1) * this.gun.stats.move;
+  }
+
   private applyClass(idx: number) {
     this.classIdx = idx;
     const l = this.classes[idx];
@@ -534,11 +616,12 @@ export class Game {
     this.frags = l.perk1 === 'pockets' ? 2 : 1;
     this.tacs = 2;
     this.player.maxHealth = l.perk2 === 'tough' ? 130 : 100;
-    this.player.speedMult = l.perk1 === 'fleet' ? 1.1 : 1;
+    this.updateMove();
   }
 
   private endMatch() {
     this.phase = 'ended';
+    this.sfx.music('menu');
     this.player.alive = false;
     this.vm.cancelThrow();
     const before = levelForXp(this.profile.xp);
@@ -559,14 +642,31 @@ export class Game {
     }
     const won = this.cfg.mode === 'tdm' ? this.teamScore[0] > this.teamScore[1] : rows[0] === this.agent;
     const pr = this.profile;
+    const m = this.ms;
     bump(pr, 'matches');
     bumpMax(pr, 'best_match_kills', this.agent.kills);
+    bumpMax(pr, 'best_match_score', this.agent.kills * 100);
+    if (rows[0] === this.agent) bump(pr, 'top_finishes');
+    if (this.agent.deaths === 0) bump(pr, 'deathless');
+    if (m.lastKiller === this.agent) bump(pr, 'final_kills');
     if (won) {
       bump(pr, 'wins');
       bump(pr, `${this.cfg.mode}_wins`);
       bump(pr, `win_${this.cfg.mapId}`);
       bump(pr, `win_${this.cfg.difficulty}`);
       if (this.agent.deaths === 0) bump(pr, 'flawless');
+      if (rows[0] === this.agent) bump(pr, 'mvp');
+      if (m.trailingAtHalf) bump(pr, 'comebacks');
+      if (this.agent.deaths >= 9) bump(pr, 'nine_lives');
+      if (!m.sprinted) bump(pr, 'nosprint_wins');
+      if (new Date().getHours() < 5) bump(pr, 'night_wins');
+      if (m.lastKiller === this.agent) bump(pr, 'final_kill_wins');
+      const margin = this.cfg.mode === 'tdm' ? this.teamScore[0] - this.teamScore[1] : this.agent.kills - (rows[1]?.kills ?? 0);
+      if (margin >= 10) bump(pr, 'blowouts');
+      pr.stats.loss_now = 0;
+    } else {
+      bump(pr, 'loss_now');
+      bumpMax(pr, 'loss_run', pr.stats.loss_now);
     }
     this.addXp(bonus, before);
     const kd = this.agent.deaths ? (this.agent.kills / this.agent.deaths).toFixed(2) : String(this.agent.kills);
@@ -642,6 +742,9 @@ export class Game {
     this.player.spawn(p, Math.atan2(p.x, p.z));
     this.vm.reload = -1;
     this.hud.deadScreen(false);
+    this.ms.spawnT = this.now;
+    this.ms.lifeWeapons.clear();
+    this.ms.stillT = 0;
   }
 
   private shotFired(shooter: Combatant, suppressed: boolean) {
@@ -684,6 +787,92 @@ export class Game {
     this.throwables.throw(kind, from, vel, this.agent);
   }
 
+  /**
+   * An explosion owned by `owner`. Frags hurt their owner too; killstreak ordnance
+   * (label other than 'frag') only hurts the owner's enemies.
+   */
+  private explode(pos: THREE.Vector3, owner: Combatant, radius: number, damage: number, label: string) {
+    const cam = this.camera.position;
+    const dist = pos.distanceTo(cam);
+    this.effects.explosion(pos);
+    this.sfx.explosion(dist, panFor(pos, cam, this.camera.rotation.y));
+    if (this.player.alive) this.punch += Math.max(0, 0.12 * (1 - dist / 18));
+    const frag = label === 'frag';
+    const tmp = new THREE.Vector3();
+    const from = pos.clone().setY(pos.y + 0.3);
+    let kills = 0;
+    for (const c of [...this.world.combatants]) {
+      if (!c.alive) continue;
+      if (c === owner ? !frag : !this.hostile(owner, c)) continue;
+      const center = tmp.copy(c.pos).setY(c.pos.y + 0.9);
+      const d = center.distanceTo(pos);
+      if (d > radius) continue;
+      const dir = center.clone().sub(from);
+      const len = dir.length();
+      if (raycastBoxes(this.map.boxes, from, dir.divideScalar(len), len)) continue;
+      const dmg = damage * Math.pow(1 - d / radius, 1.1);
+      const name = frag ? 'FRAG' : STREAKS[label as StreakId].name;
+      if (c.isPlayer) this.damagePlayer(dmg, owner, pos, name);
+      else if ((c as Bot).damage(dmg, owner, this.now)) {
+        kills++;
+        this.registerKill(owner, c, false, name, frag ? 'frag' : `streak_${label}`);
+      }
+    }
+    if (owner === this.agent && kills) {
+      bump(this.profile, 'explosive_kills', kills);
+      if (kills >= 2) bump(this.profile, 'explosive_multi');
+      bumpMax(this.profile, 'explosive_best', kills);
+      if (frag && kills >= 3) bump(this.profile, 'frag_triple');
+    }
+  }
+
+  /** Supply drop pickup: full ammo on both guns, an extra frag and tactical, maybe a bonus streak. */
+  private resupply() {
+    for (const g of this.guns) {
+      g.ammo = g.magSize;
+      g.reserve = g.stats.reserve;
+    }
+    this.frags = Math.min(this.frags + 1, 3);
+    this.tacs = Math.min(this.tacs + 1, 3);
+    bump(this.profile, 'packages');
+    this.sfx.streak();
+    const bonus = Math.random() < 0.25 ? (['sweep', 'mortar', 'sentry'] as StreakId[])[Math.floor(Math.random() * 3)] : null;
+    if (bonus) {
+      this.earned.push(bonus);
+      this.hud.streakEarned(STREAKS[bonus].name, streakIcon(bonus, 72), 'BONUS FROM SUPPLY DROP');
+      this.sfx.streakReady();
+    } else this.hud.showBanner('RESUPPLIED', 'FULL AMMO · +1 FRAG · +1 TACTICAL', 2.5);
+  }
+
+  /** System Crash: glitch the screen, then every enemy drops and the match ends. */
+  private systemCrash() {
+    this.crashT = 0;
+    this.sfx.systemCrash();
+    this.hud.glitch(true);
+    bump(this.profile, 'crash_used');
+  }
+
+  private updateCrash(dt: number) {
+    const before = this.crashT;
+    this.crashT += dt;
+    if (before < 1.8 && this.crashT >= 1.8 && this.phase === 'match') {
+      for (const b of this.bots) {
+        if (!b.active || !b.alive || !this.hostile(this.agent, b)) continue;
+        b.damage(9999, this.agent, this.now);
+        if (this.phase === 'match') this.registerKill(this.agent, b, false, 'SYSTEM CRASH', 'streak_crash');
+      }
+      if (this.phase === 'match') {
+        if (this.cfg.mode === 'tdm') this.teamScore[0] = Math.max(this.teamScore[0], this.teamScore[1] + 1);
+        else this.agent.kills = Math.max(this.agent.kills, ...this.world.combatants.map((c) => c.kills + (c.isPlayer ? 0 : 1)));
+        this.endMatch();
+      }
+    }
+    if (this.crashT > 3.2) {
+      this.crashT = -1;
+      this.hud.glitch(false);
+    }
+  }
+
   /** Grenade went off: damage, stun or smoke. */
   private detonate(kind: ThrowKind, pos: THREE.Vector3, owner: Combatant) {
     const cam = this.camera.position;
@@ -701,19 +890,7 @@ export class Game {
       return;
     }
     if (kind === 'frag') {
-      this.effects.explosion(pos);
-      this.sfx.explosion(dist, pan);
-      if (this.player.alive) this.punch += Math.max(0, 0.12 * (1 - dist / 18));
-      for (const c of [...this.world.combatants]) {
-        if (!c.alive) continue;
-        if (c !== owner && !this.hostile(owner, c)) continue;
-        const center = tmp.copy(c.pos).setY(c.pos.y + 0.9);
-        const d = center.distanceTo(pos);
-        if (d > 7 || !lineClear(center)) continue;
-        const dmg = 170 * Math.pow(1 - d / 7, 1.1);
-        if (c.isPlayer) this.damagePlayer(dmg, owner, pos, 'FRAG');
-        else if ((c as Bot).damage(dmg, owner, this.now)) this.registerKill(owner, c, false, 'FRAG');
-      }
+      this.explode(pos, owner, 7, 170, 'frag');
       return;
     }
     // stun
@@ -742,14 +919,19 @@ export class Game {
     return this.isFriendly(c) ? `<span style="color:${ALLY}">${c.name}</span>` : `<span class="enemy">${c.name}</span>`;
   }
 
-  private registerKill(killer: Combatant, victim: Combatant, head: boolean, weapon?: string) {
+  /**
+   * `weapon` is the kill-feed label; `src` the stat key for player kills
+   * (a weapon id, 'frag', 'melee' or 'streak_<id>'; defaults to the held gun).
+   */
+  private registerKill(killer: Combatant, victim: Combatant, head: boolean, weapon?: string, src?: string) {
     killer.kills++;
     victim.deaths++;
     if (this.phase !== 'match') return;
     if (this.cfg.mode === 'tdm') this.teamScore[killer.team === this.agent.team ? 0 : 1]++;
-    const wpn = weapon ?? (killer.isPlayer ? this.gun.stats.name.split(' ')[0] : (killer as Bot).weapon === 'vk47' ? 'VK-47' : 'KR-4');
+    const wpn = weapon ?? (killer.isPlayer ? this.gun.stats.name.split(' ')[0] : WEAPONS[(killer as Bot).weapon].name.split(' ')[0]);
     this.hud.killfeed(`${this.nameHtml(killer)} [${wpn}]${head ? ' ⌖' : ''} ${this.nameHtml(victim)}`);
-    if (killer.isPlayer) this.onPlayerKill(victim, head, weapon === 'FRAG' ? 'frag' : this.gun.stats.weapon);
+    this.onAnyKill(killer, victim);
+    if (killer.isPlayer) this.onPlayerKill(victim, head, src ?? (weapon === 'FRAG' ? 'frag' : this.gun.stats.weapon));
     const lim = MODES[this.cfg.mode].scoreLimit;
     const top = this.cfg.mode === 'tdm' ? Math.max(...this.teamScore) : Math.max(...this.world.combatants.map((c) => c.kills));
     if (top >= lim) this.endMatch();
@@ -760,6 +942,8 @@ export class Game {
     if (!p.alive || this.phase !== 'match') return;
     p.health -= dmg;
     p.lastHit = this.now;
+    const blast = weapon === 'FRAG' || Object.values(STREAKS).some((s) => s.name === weapon);
+    if (blast && p.health > 0 && p.health / p.maxHealth < 0.2) bump(this.profile, 'explosion_survivals');
     this.punch += 0.02;
     this.hud.damageFrom(Math.atan2(at.x - p.pos.x, at.z - p.pos.z));
     this.sfx.hurt();
@@ -770,6 +954,12 @@ export class Game {
       const cooked = this.vm.cancelThrow();
       if (cooked) this.throwables.throw(cooked, this.camera.position.clone().setY(p.pos.y + 1), new THREE.Vector3(0, 1, 0), this.agent);
       this.profile.deaths++;
+      const m = this.ms;
+      m.deathRun++;
+      bumpMax(this.profile, 'death_run', m.deathRun);
+      m.deathTimes.push(this.now);
+      bumpMax(this.profile, 'deaths_30s', m.deathTimes.filter((t) => this.now - t <= 30).length);
+      m.headRun = 0;
       this.streak = 0;
       this.respawnT = 3.5;
       this.deathCam = 0;
@@ -798,37 +988,51 @@ export class Game {
     const dir = fwd.clone().addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
 
     const wHit = raycastBoxes(this.map.boxes, eye, dir, 200);
-    let best = wHit ? wHit.t : 200;
-    let hitBot: Bot | null = null;
-    let head = false;
+    const wall = wHit ? wHit.t : 200;
+    // every body on the line of fire, nearest first (sniper rounds carry on through one)
+    const hits: { bot: Bot; t: number; zone: HitZone }[] = [];
     for (const b of this.bots) {
       if (!b.active || !b.alive) continue;
+      let bt = wall;
+      let zone: HitZone | null = null;
       for (const s of b.spheres) {
         const t = raySphere(eye, dir, s.c, s.r);
-        if (t > 0 && t < best) {
-          best = t;
-          hitBot = b;
-          head = s.head;
+        if (t > 0 && t < bt) {
+          bt = t;
+          zone = s.zone;
         }
       }
+      if (zone) hits.push({ bot: b, t: bt, zone });
     }
+    hits.sort((x, y) => x.t - y.t);
+    const pierce = this.gun.stats.cls === 'sniper' ? 2 : 1;
+    const struck = hits.slice(0, pierce);
+    const best = struck.length ? struck[struck.length - 1].t : wall;
     const end = eye.clone().addScaledVector(dir, best);
+    bump(this.profile, 'shots_fired');
     const muzzle = eye.clone().addScaledVector(fwd, 0.6).addScaledVector(right, 0.12 * (1 - this.vm.ads)).addScaledVector(up, -0.1 * (1 - this.vm.ads * 0.6));
     const st = this.gun.stats;
     if (!st.suppressed && Math.random() < 0.5) this.effects.tracer(muzzle, end);
     if (!st.suppressed) this.effects.muzzle(muzzle);
 
-    if (hitBot && !this.isFriendly(hitBot)) {
-      const dmg = this.gun.damageAt(best) * (head ? HEADSHOT_MULT : 1);
-      const killed = hitBot.damage(dmg, this.agent, this.now);
-      this.effects.blood(end, dir, head);
+    let shotKills = 0;
+    struck.forEach((h, i) => {
+      if (this.isFriendly(h.bot)) return;
+      const head = h.zone === 'head';
+      const dmg = this.gun.stats.zoneDamage(h.zone, h.t) * (i > 0 ? 0.8 : 1);
+      this.killCtx = { preHealth: h.bot.health, zone: h.zone };
+      const killed = h.bot.damage(dmg, this.agent, this.now);
+      this.effects.blood(eye.clone().addScaledVector(dir, h.t), dir, head);
       this.hud.hitmarker(killed, head);
       if (head) this.sfx.headshot(killed);
       else this.sfx.hitmarker(killed);
-      if (killed) this.registerKill(this.agent, hitBot, head);
-    } else if (!hitBot && wHit) {
-      this.effects.impact(wHit.point, wHit.normal, wHit.surface);
-    }
+      if (killed) {
+        shotKills++;
+        this.registerKill(this.agent, h.bot, head);
+      }
+    });
+    if (shotKills >= 2) bump(this.profile, 'collaterals');
+    if (!struck.length && wHit) this.effects.impact(wHit.point, wHit.normal, wHit.surface);
 
     const adsK = lerp(1, 0.65, this.vm.ads) * st.recoil;
     this.player.pitch += (0.006 + Math.random() * 0.003) * adsK;
@@ -836,6 +1040,11 @@ export class Game {
     this.punch += 0.01 * adsK;
     this.bloom = Math.min(this.bloom + 0.007 * st.recoil, 0.06);
     this.vm.fire();
+    if (st.bolt) {
+      const secs = (60 / st.rpm) * 0.85;
+      this.vm.cycleBolt(secs);
+      this.sfx.boltCycle(secs);
+    }
     this.sfx.gunshot(0, 0, st.weapon, st.suppressed);
     this.shotFired(this.agent, st.suppressed);
   }
@@ -867,33 +1076,167 @@ export class Game {
   }
 
   /** Challenge counters for one player kill, read from the player's state at the moment of the kill. */
-  private trackKill(victim: Combatant, head: boolean, weaponId: string) {
+  private trackKill(victim: Combatant, head: boolean, src: string) {
     const pr = this.profile;
     const p = this.player;
-    const frag = weaponId === 'frag';
+    const m = this.ms;
+    const now = this.now;
+    const gunId = WEAPONS[src as WeaponId] ? (src as WeaponId) : null;
+    const st = this.gun.stats;
+    const vb = victim.isPlayer ? null : (victim as Bot);
+    const ctx = this.killCtx;
+    this.killCtx = null;
     bump(pr, 'kills');
-    if (head) bump(pr, 'headshots');
-    if (WEAPONS[weaponId as WeaponId]) bump(pr, `kills_${weaponId}`);
-    if (frag) bump(pr, 'frag_kills');
-    else {
+    if (head) {
+      bump(pr, 'headshots');
+      m.headRun++;
+      bumpMax(pr, 'head_run', m.headRun);
+    } else m.headRun = 0;
+    if (gunId) {
+      const cls = WEAPONS[gunId].cls;
+      bump(pr, `kills_${gunId}`);
+      bump(pr, `kills_cls_${cls}`);
       bump(pr, this.vm.ads > 0.5 ? 'ads_kills' : 'hip_kills');
-      if (this.gun.stats.suppressed) bump(pr, 'suppressed_kills');
+      if (st.suppressed) bump(pr, 'suppressed_kills');
+      if (this.classes[this.classIdx].under === 'laser' && this.active === 0) bump(pr, 'laser_kills');
+      if (hasGold(pr.weaponHeads, gunId)) bump(pr, 'gold_kills');
+      if (cls === 'sniper' && this.vm.ads < 0.3) bump(pr, 'noscope_kills');
+      if (cls === 'sniper' && p.speed > 1) bump(pr, 'sniper_move_kills');
+      if (cls === 'smg' && victim.pos.distanceTo(p.pos) < 10) bump(pr, 'smg_close_kills');
+      if (victim.pos.distanceTo(p.pos) > 35) bump(pr, 'longshots');
+      if (this.throwables.smokeBlocks(this.camera.position, victim.pos.clone().setY(victim.pos.y + 1.3))) bump(pr, 'smoke_kills');
     }
+    if (src === 'frag') bump(pr, 'frag_kills');
+    if (src.startsWith('streak_')) {
+      bump(pr, 'streak_kills');
+      bump(pr, `kills_${src}`);
+      const id = src.slice(7) as StreakId;
+      if (STREAKS[id]?.air) bump(pr, 'air_streak_kills');
+    }
+    if (src === 'melee') bump(pr, 'melee_kills');
+    m.lifeWeapons.add(gunId ? (this.active === 0 ? 'primary' : 'secondary') : src.startsWith('streak_') ? 'streak' : src);
+    if (m.lifeWeapons.size >= 3) bump(pr, 'meal_deal');
+    // body state at the moment of the kill
     if (p.slide > 0) bump(pr, 'slide_kills');
     else if (p.crouchT > 0.5) bump(pr, 'crouch_kills');
     if (!p.onGround) bump(pr, 'air_kills');
-    if (victim.pos.distanceTo(p.pos) > 35) bump(pr, 'longshots');
+    if (p.speed < 0.3) bump(pr, 'still_kills');
+    if (m.stillT >= 10) bump(pr, 'afk_kills');
+    if (now - m.lastSprintT < 1) bump(pr, 'sprint_kills');
+    if (m.crouchTaps.filter((t) => now - t < 2).length >= 3) bump(pr, 'crouchspam_kills');
+    if (now - p.lastHit < 2) bump(pr, 'reflex_kills');
+    if (now - m.spawnT < 3) bump(pr, 'spawn3_kills');
+    if (now - m.spawnT < 5) bump(pr, 'spawn5_kills');
+    const hp = (p.health / p.maxHealth) * 100;
+    if (hp < 10) bump(pr, 'low_hp_kills');
+    if (hp < 5) bump(pr, 'clutch_kills');
+    if (this.sweepT > 0) bump(pr, 'sweep_kills');
+    if (m.lastKillPos && m.lastKillPos.distanceTo(p.pos) < 4) bump(pr, 'camp_kills');
+    m.lastKillPos = p.pos.clone();
+    // the victim's side of it
     if (victim.name === this.killedBy) bump(pr, 'paybacks');
-    if (!victim.isPlayer && (victim as Bot).stunnedUntil > this.now) bump(pr, 'stunned_kills');
+    if (vb) {
+      if (vb.stunnedUntil > now) bump(pr, 'stunned_kills');
+      if (vb.currentTarget !== this.agent) bump(pr, 'ambush_kills');
+      // facing away: the victim's forward points away from us
+      const fwd = new THREE.Vector3(Math.sin(vb.yaw), 0, Math.cos(vb.yaw));
+      const toUs = p.pos.clone().sub(vb.pos).setY(0).normalize();
+      if (fwd.dot(toUs) < 0.2) {
+        bump(pr, 'flank_kills');
+        if (src === 'melee') bump(pr, 'melee_back');
+      }
+      if (src === 'melee' && now - p.lastHit < 3) bump(pr, 'melee_trades');
+      if (ctx && ctx.preHealth < 50) bump(pr, 'finisher_kills');
+      // someone else on our team softened them up
+      if (this.cfg.mode === 'tdm' && [...vb.hurtBy.entries()].some(([id, t]) => id !== this.agent.id && now - t < 5)) bump(pr, 'steals');
+      if ((this.lifeKills.get(vb.id) ?? 0) >= 3) bump(pr, 'buzzkills');
+    }
     if (this.world.combatants.reduce((s, c) => s + c.kills, 0) === 1) bump(pr, 'first_bloods');
-    this.multi = this.now - this.lastKillT < 3 ? this.multi + 1 : 1;
-    this.lastKillT = this.now;
+    // bursts
+    this.multi = now - this.lastKillT < 3 ? this.multi + 1 : 1;
+    if (now - this.lastKillT < 2) bump(pr, 'quick_doubles');
+    this.lastKillT = now;
     if (this.multi === 2) bump(pr, 'double');
     if (this.multi === 3) bump(pr, 'triple');
+    m.killTimes.push(now);
+    bumpMax(pr, 'kills_30s', m.killTimes.filter((t) => now - t <= 30).length);
+    bumpMax(pr, 'kills_10s', m.killTimes.filter((t) => now - t <= 10).length);
     const s = this.streak + 1;
     if (s === 3) bump(pr, 'streak3');
     if (s === 5) bump(pr, 'streak5');
     if (s === 10) bump(pr, 'streak10');
+    m.deathRun = 0;
+    if (!m.reloaded && this.agent.kills >= 15 && !m.noReloadDone) {
+      m.noReloadDone = true;
+      bump(pr, 'no_reload_15');
+    }
+  }
+
+  /** Time-based challenge counters. */
+  private trackFrame(dt: number) {
+    const pr = this.profile;
+    const p = this.player;
+    const m = this.ms;
+    bump(pr, 'time_played', dt);
+    if (!p.alive) return;
+    if (p.crouchT > 0.5) bump(pr, 'crouch_time', dt);
+    if (p.sprinting) {
+      bump(pr, 'sprint_m', p.speed * dt);
+      m.lastSprintT = this.now;
+      m.sprinted = true;
+    }
+    m.stillT = p.speed < 0.3 ? m.stillT + dt : 0;
+    if (this.input.pressed.has('KeyC')) m.crouchTaps = [...m.crouchTaps.filter((t) => this.now - t < 2), this.now];
+    const hp = p.health / p.maxHealth;
+    if (hp < 0.1) m.lowHp = true;
+    else if (m.lowHp && hp >= 0.99) {
+      m.lowHp = false;
+      bump(pr, 'clutch_survivals');
+    }
+    if (!m.halfChecked && this.timeLeft <= (MODES[this.cfg.mode].minutes * 60) / 2) {
+      m.halfChecked = true;
+      m.trailingAtHalf = this.cfg.mode === 'tdm' ? this.teamScore[0] < this.teamScore[1] : this.sortedBoard()[0] !== this.agent;
+    }
+  }
+
+  /** Gun-butt melee: kills anything in reach in front of you. */
+  private melee() {
+    this.vm.melee();
+    const eye = this.camera.position;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0).normalize();
+    let hit: Bot | null = null;
+    let best = 2.3;
+    for (const b of this.bots) {
+      if (!b.active || !b.alive || !this.hostile(this.agent, b)) continue;
+      const to = b.pos.clone().sub(eye).setY(0);
+      const d = to.length();
+      if (d < best && to.normalize().dot(fwd) > 0.6) {
+        best = d;
+        hit = b;
+      }
+    }
+    this.sfx.melee(!!hit);
+    if (!hit) return;
+    this.effects.blood(hit.spheres[1].c, fwd, false);
+    this.hud.hitmarker(true);
+    if (hit.damage(200, this.agent, this.now)) this.registerKill(this.agent, hit, false, 'MELEE', 'melee');
+  }
+
+  /** Bookkeeping for every kill in the match (anyone on anyone). */
+  private onAnyKill(killer: Combatant, victim: Combatant) {
+    this.lifeKills.set(killer.id, (this.lifeKills.get(killer.id) ?? 0) + 1);
+    this.lifeKills.set(victim.id, 0);
+    // bots killed by another bot: was the player in on it?
+    if (!killer.isPlayer && !victim.isPlayer && this.hostile(this.agent, victim)) {
+      const t = (victim as Bot).hurtBy.get(this.agent.id);
+      if (t !== undefined && this.now - t < 5) bump(this.profile, 'assists');
+    }
+    if (victim.isPlayer && !killer.isPlayer) {
+      const n = (this.ms.deathsBy.get(killer.id) ?? 0) + 1;
+      this.ms.deathsBy.set(killer.id, n);
+      if (n === 5) bump(this.profile, 'nemesis');
+    }
+    this.ms.lastKiller = killer;
   }
 
   /** Pay out any challenges that just completed (loops, since their XP can level you into another). */
@@ -948,15 +1291,16 @@ export class Game {
     this.streak++;
     this.profile.kills++;
     this.profile.bestStreak = Math.max(this.profile.bestStreak, this.streak);
-    if (this.streak === SWEEP_STREAK) {
-      xp += XP.streak3;
-      this.sweepReady = true;
-      this.sfx.streak();
-      this.hud.showBanner('SWEEP READY', 'PRESS [4] TO LAUNCH RADAR SWEEP');
-    } else if (this.streak === 5) {
-      xp += XP.streak5;
-      this.sfx.streak();
-      this.hud.showBanner('5 KILL STREAK', `+${XP.streak5} XP`);
+    if (this.streak === 3) xp += XP.streak3;
+    if (this.streak === 5) xp += XP.streak5;
+    if (this.streak >= 2) this.hud.streakCount(this.streak);
+    // earn any picked killstreak whose kill count we just hit
+    for (const id of this.profile.streaks) {
+      if (STREAKS[id].kills === this.streak) {
+        this.earned.push(id);
+        this.sfx.streakReady();
+        this.hud.streakEarned(STREAKS[id].name, streakIcon(id, 72));
+      }
     }
     this.addXp(xp, before);
   }
@@ -968,9 +1312,10 @@ export class Game {
     const after = levelForXp(this.profile.xp);
     if (after > levelBefore) {
       const unlock = unlockTrack().get(after)?.join(' · ');
-      if (after >= MAX_LEVEL && canPrestige(this.profile)) this.hud.showBanner(`LEVEL ${MAX_LEVEL}`, 'PRESTIGE IS AVAILABLE IN BARRACKS', 5);
-      else this.hud.showBanner('PROMOTED', `LEVEL ${after}${unlock ? ` · UNLOCKED: ${unlock}` : ''}`, 4);
-      this.sfx.levelUp();
+      const rank = rankInfo(after).name.toUpperCase();
+      const extra = after >= MAX_LEVEL && canPrestige(this.profile) ? 'PRESTIGE IS AVAILABLE IN BARRACKS' : unlock ?? '';
+      this.hud.rankUp(badgeImg(after, 0, 128, false), `LEVEL ${after}`, rank, extra);
+      this.sfx.rankUp();
     }
     saveProfile(this.profile);
     this.refreshHud();
@@ -986,10 +1331,43 @@ export class Game {
     this.hud.rank(lvl, this.profile.xp - base, need, nu ? `LVL ${nu[0]} ${nu[1]}` : '');
   }
 
+  /** Killstreak rail: the three picks with kill counts, lit when earned, plus the [4] prompt. */
+  private streakKey() {
+    return `${this.profile.streaks}|${this.earned}|${this.streak}|${Math.ceil(this.sweepT)}`;
+  }
+
   private streakHtml() {
-    if (this.sweepT > 0) return `SWEEP ACTIVE ${Math.ceil(this.sweepT)}s`;
-    if (this.sweepReady) return `<span class="ready">[4] SWEEP READY</span>`;
-    return `SWEEP: ${Math.min(this.streak, SWEEP_STREAK)}/${SWEEP_STREAK} KILLS`;
+    const top = this.earned[this.earned.length - 1];
+    const slots = this.profile.streaks
+      .map((id) => {
+        const s = STREAKS[id];
+        const have = this.earned.filter((e) => e === id).length;
+        const prog = Math.min(1, this.streak / s.kills);
+        return `<div class="sk ${have ? 'got' : ''} ${top === id ? 'top' : ''}"><i style="height:${have ? 100 : prog * 100}%"></i>${streakIcon(id, 26)}<b>${s.kills}</b>${have > 1 ? `<em>×${have}</em>` : ''}</div>`;
+      })
+      .join('');
+    const prompt = top ? `<div class="sk-use">[4] ${STREAKS[top].name}</div>` : this.sweepT > 0 ? `<div class="sk-use dim">SWEEP ${Math.ceil(this.sweepT)}s</div>` : '';
+    return `${prompt}<div class="sk-row">${slots}</div>`;
+  }
+
+  /** Call in the newest earned killstreak. */
+  private useStreak() {
+    const id = this.earned.pop();
+    if (!id) return;
+    this.sfx.streakCall();
+    bump(this.profile, 'streaks_used');
+    const picks = [...this.profile.streaks].sort((a, b) => STREAKS[b].kills - STREAKS[a].kills);
+    if (id === picks[0]) bump(this.profile, 'top_streak_used');
+    if (id === 'sweep') {
+      this.sweepT = SWEEP_TIME;
+      bump(this.profile, 'sweeps');
+      this.hud.showBanner('RADAR SWEEP', 'ENEMY POSITIONS REVEALED', 2.5);
+    } else if (id === 'crash') {
+      this.systemCrash();
+    } else {
+      this.streakRt.activate(id);
+      this.hud.showBanner(STREAKS[id].name, id === 'supply' ? 'CRATE INBOUND' : id === 'sentry' ? 'SENTRY DEPLOYED' : 'INBOUND', 2.5);
+    }
   }
 
   private sortedBoard() {
@@ -1054,6 +1432,8 @@ export class Game {
     const frozen = this.phase === 'match' && this.pregame !== 'off';
     if (!frozen) for (const b of this.bots) b.update(dt, this.world);
     this.throwables.update(dt, this.map.boxes, (k, pos, owner) => this.detonate(k, pos, owner));
+    if (this.phase === 'match') this.streakRt.update(dt);
+    if (this.crashT >= 0) this.updateCrash(dt);
     this.effects.update(dt);
 
     // keep the shadow frustum centred on what the camera is looking at
@@ -1122,12 +1502,13 @@ export class Game {
       if (n !== this.lastCount && n > 0) {
         this.lastCount = n;
         this.hud.countdown(String(n));
-        this.sfx.click(n <= 3 ? 1400 : 900, 0.35);
+        this.sfx.countdownBeep(n);
       }
       if (this.pregameT <= 0) {
         this.pregame = 'off';
+        this.ms.spawnT = this.now;
         this.hud.countdown('GO');
-        this.sfx.streak();
+        this.sfx.countdownBeep(0);
         setTimeout(() => this.hud.countdown(null), 900);
       }
     }
@@ -1160,18 +1541,22 @@ export class Game {
       if (p.crouchT < 0.5) this.sfx.footstep(p.sprinting ? 0.2 : 0.12);
     }
 
+    if (live) this.trackFrame(dt);
     if (p.alive && live) {
-      if (inp.pressed.has('KeyR') && !this.vm.busy && this.gun.startReload()) this.lastReload = 0;
+      if (inp.pressed.has('KeyV') && !this.vm.busy && this.gun.reloading < 0) this.melee();
+      if (inp.pressed.has('KeyR') && !this.vm.busy && this.gun.startReload()) {
+        this.lastReload = 0;
+        this.ms.reloaded = true;
+      }
       if (this.gun.ammo === 0 && this.gun.reserve > 0 && this.gun.reloading < 0 && !this.vm.busy) {
         this.autoReloadT += dt;
-        if (this.autoReloadT > 0.25 && this.gun.startReload()) this.lastReload = 0;
+        if (this.autoReloadT > 0.25 && this.gun.startReload()) {
+          this.lastReload = 0;
+          this.ms.reloaded = true;
+        }
       } else this.autoReloadT = 0;
-      if (inp.pressed.has('Digit4') && this.sweepReady) {
-        this.sweepReady = false;
-        this.sweepT = SWEEP_TIME;
-        bump(this.profile, 'sweeps');
-        this.sfx.streak();
-        this.hud.showBanner('SWEEP ONLINE', 'ENEMY POSITIONS REVEALED');
+      if (inp.pressed.has('Digit4') && this.earned.length) {
+        this.useStreak();
       }
       // weapon swap: 1 / 2 / mouse wheel
       const want = inp.pressed.has('Digit1') ? 0 : inp.pressed.has('Digit2') ? 1 : inp.wheel !== 0 ? 1 - this.active : this.active;
@@ -1181,6 +1566,7 @@ export class Game {
         this.active = want;
         const st = this.gun.stats;
         this.vm.switchTo(cfgFromLoadout(this.classes[this.classIdx], want ? 'secondary' : 'primary'), st.eyeDist, st.recoil);
+        this.updateMove();
         this.sfx.click(900, 0.2);
       }
       // equipment
@@ -1223,6 +1609,18 @@ export class Game {
     } else {
       cam.rotation.set(p.pitch + this.punch, p.yaw, 0);
     }
+    // sniper scope: full-screen sight picture, breathing sway, SHIFT to hold breath
+    const scoped = p.alive && this.gun.stats.scoped && this.vm.ads > 0.82;
+    if (scoped) {
+      const holding = inp.down('ShiftLeft') && this.breath > 0;
+      this.breath = holding ? Math.max(0, this.breath - dt / 4) : Math.min(1, this.breath + dt / 6);
+      const k = holding ? 0.12 : this.breath <= 0 ? 1.8 : 1;
+      this.swayT += dt;
+      cam.rotation.x += Math.sin(this.swayT * 1.3) * 0.0045 * k;
+      cam.rotation.y += Math.sin(this.swayT * 0.9 + 1) * 0.006 * k;
+    } else this.breath = Math.min(1, this.breath + dt / 6);
+    this.hud.scope(scoped, this.breath);
+    this.vm.hidden = scoped;
     const targetFov = lerp(s.fov, s.fov * this.gun.stats.adsFov, this.vm.ads) + (p.sprinting ? 4 : 0);
     if (Math.abs(cam.fov - targetFov) > 0.01) {
       cam.fov = damp(cam.fov, targetFov, 14, dt);
@@ -1286,7 +1684,7 @@ export class Game {
     }
     this.hud.minimap(this.map.boxes, this.map.half, p.pos.x, p.pos.z, p.yaw, markers, this.sweepT > 0 ? 1 : 0);
     this.hud.scoreboard(this.agent.kills, this.agent.deaths, this.streak, this.matchXp);
-    this.hud.streakInfo(this.streakHtml());
+    this.hud.streakInfo(this.streakKey(), () => this.streakHtml());
     this.hud.matchBar(this.matchHtml());
     const tab = inp.down('Tab');
     this.hud.scoreboardTable(tab, tab ? this.boardKey() : '', () => this.boardHtml());

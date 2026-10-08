@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Materials } from './materials';
 import type { Loadout, MagId, MuzzleId, OpticId, UnderId, WeaponId } from './loadout';
-import { group, mesh, rbox } from './util';
+import { group, mesh, rbox, type PlaceOpts } from './util';
 import { acogReticleTex, dotReticleTex, markingTex, reticleTex, weaponCamoTex, type CamoId } from './textures';
 
 /**
@@ -62,7 +63,23 @@ let acogRet: THREE.Texture | null = null;
 export function buildWeapon(mats: Materials, cfg: WeaponCfg, firstPerson = true): THREE.Group {
   const paint = camoMaterial(cfg.camo, mats.anodized);
   const m: Materials = cfg.camo === 'none' ? mats : { ...mats, anodized: paint, fde: paint, wood: paint };
-  const build = { kr4: buildKR4, vk47: buildVK47, p9: buildP9, r357: buildR357 }[cfg.weapon];
+  const builders: Record<WeaponId, (m: Materials, cfg: WeaponCfg) => THREE.Group> = {
+    kr4: buildKR4,
+    vk47: buildVK47,
+    vx9: buildVX9,
+    sp45: buildSP45,
+    lm5: buildLM5,
+    pk7: buildPK7,
+    kestrel: buildKestrel,
+    warden: buildWarden,
+    talon: buildTalon,
+    vulture: buildVulture,
+    sk10: buildSK10,
+    mk20: buildMK20,
+    p9: buildP9,
+    r357: buildR357,
+  };
+  const build = builders[cfg.weapon];
   const root = build(m, cfg);
   root.userData.cfg = cfg;
   root.userData.kind = cfg.weapon === 'p9' ? 'pistol' : cfg.weapon === 'r357' ? 'revolver' : 'rifle';
@@ -134,7 +151,90 @@ function addOptic(root: THREE.Object3D, m: Materials, kind: OpticId, y: number, 
     mesh(cyl(0.0065, 0.0065, 0.01, 16), m.anodizedEdge, sight, { pos: [0.02, 0.036, 0.004], rot: Z90 }); // brightness knob
     mesh(rbox(0.008, 0.012, 0.012, 0.002), m.anodizedEdge, sight, { pos: [-0.016, 0.01, 0.0] }); // mount lever
     group(sight, { pos: [0, 0.036, -0.019], name: 'sight' });
+  } else if (kind === 'sniper') {
+    sniperScope(root, m, y, z);
   }
+}
+
+/**
+ * Long variable-power scope (30 mm tube, 50 mm objective) on two rings.
+ * Everything that crosses the line of sight is an open shell, so looking down
+ * the eyepiece shows a dark tube; the game draws the full-screen reticle.
+ */
+function sniperScope(root: THREE.Object3D, m: Materials, y: number, z: number) {
+  const sc = group(root, { pos: [0, y, z] });
+  const cy = 0.042;
+  const shell = shellMat(m.anodized);
+  const tube = (rRear: number, rFront: number, len: number, zz: number, mat: THREE.Material = shell) =>
+    mesh(cached(`scope${rRear}|${rFront}|${len}`, () => new THREE.CylinderGeometry(rRear, rFront, len, 32, 1, true).rotateX(Math.PI / 2)), mat, sc, { pos: [0, cy, zz] });
+  // ridged grip ring made of small bars, so it never caps the tube
+  const ridges = (r: number, len: number, zz: number, n: number, mat: THREE.Material) => {
+    const list: BoxSpec[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      list.push([0.0024, 0.0022, len, Math.cos(a) * r, cy + Math.sin(a) * r, zz, 0, 0, a]);
+    }
+    boxes(sc, mat, list, 0.0006);
+  };
+  // eyepiece: rubber eyecup, ocular bell, diopter ring
+  tube(0.0205, 0.0205, 0.012, 0.177, m.rubber);
+  mesh(cached('scopeCup', () => new THREE.TorusGeometry(0.0205, 0.0026, 10, 36)), m.rubber, sc, { pos: [0, cy, 0.183] });
+  tube(0.0212, 0.0198, 0.05, 0.146);
+  ridges(0.0213, 0.008, 0.162, 30, m.anodizedEdge);
+  // magnification ring with throw lever + index dots
+  tube(0.0196, 0.0196, 0.02, 0.111);
+  ridges(0.0198, 0.013, 0.111, 28, m.anodizedEdge);
+  mesh(rbox(0.006, 0.01, 0.012, 0.002), m.anodizedEdge, sc, { pos: [0.022, cy + 0.006, 0.111], rot: [0, 0, -0.3] });
+  boxes(sc, m.lens, [[0.0012, 0.0012, 0.0012, 0, cy + 0.0201, 0.1], [0.0012, 0.0012, 0.0012, 0.006, cy + 0.0192, 0.1]], 0.0004);
+  tube(0.0196, 0.015, 0.016, 0.093);
+  tube(0.015, 0.015, 0.066, 0.052);
+  // turret saddle: wider shell + bases off the axis
+  tube(0.0182, 0.0182, 0.05, -0.004);
+  for (const r of [0.0175, -0.0175]) mesh(cached('scopeSadEdge', () => new THREE.TorusGeometry(0.0168, 0.0016, 8, 32)), m.anodizedEdge, sc, { pos: [0, cy, -0.004 + r * 1.4] });
+  // elevation (top) and windage (right) turrets with knurled caps, parallax knob on the left
+  const turret = (rot: V3, pos: V3, r: number) => {
+    const t = group(sc, { pos, rot });
+    mesh(ccyl(0.0105, 0.0105, 0.01, 24), m.anodized, t, { pos: [0, 0.004, 0] });
+    mesh(knurlGeo(r, 0.013, 26), m.anodizedEdge, t, { pos: [0, 0.0155, 0] });
+    mesh(ccyl(r * 0.9, r * 0.9, 0.002, 24), m.anodized, t, { pos: [0, 0.0228, 0] });
+    mesh(ccyl(0.0035, 0.0035, 0.002, 12), m.steel, t, { pos: [0, 0.0238, 0] });
+    mesh(rbox(0.0012, 0.006, 0.0012, 0.0004), m.lens, t, { pos: [0, 0.0105, -r - 0.0004] });
+    boxes(t, m.lens, [0, 1, 2, 3, 4].map((i) => [0.0008, 0.003, 0.0008, Math.sin(i * 0.5 - 1) * (r + 0.0002), 0.0125, -Math.cos(i * 0.5 - 1) * (r + 0.0002)] as BoxSpec), 0.0002);
+  };
+  turret([0, 0, 0], [0, cy + 0.016, -0.004], 0.0128);
+  turret([0, 0, -Math.PI / 2], [0.016, cy, -0.004], 0.0122);
+  const px = group(sc, { pos: [-0.016, cy, -0.004], rot: [0, 0, Math.PI / 2] });
+  mesh(ccyl(0.011, 0.011, 0.01, 24), m.anodized, px, { pos: [0, 0.004, 0] });
+  mesh(knurlGeo(0.015, 0.012, 30), m.anodizedEdge, px, { pos: [0, 0.015, 0] });
+  mesh(ccyl(0.0135, 0.0135, 0.002, 24), m.anodized, px, { pos: [0, 0.022, 0] });
+  // front tube, objective bell and housing
+  tube(0.015, 0.015, 0.076, -0.067);
+  tube(0.015, 0.0272, 0.04, -0.125);
+  tube(0.0272, 0.0272, 0.04, -0.165);
+  mesh(cached('scopeObjRing', () => new THREE.TorusGeometry(0.0272, 0.0018, 8, 40)), m.anodizedEdge, sc, { pos: [0, cy, -0.185] });
+  mesh(cached('scopeObjGlass', () => new THREE.CircleGeometry(0.026, 36)), m.glass, sc, { pos: [0, cy, -0.18], rot: [0, Math.PI, 0] });
+  mesh(cached('scopeEyeGlass', () => new THREE.CircleGeometry(0.0195, 36)), m.glass, sc, { pos: [0, cy, 0.168] });
+  // rings: open bands on bases clamped to the rail, two cap screws a side + cross-bolt
+  for (const zz of [-0.068, 0.052]) {
+    mesh(cached('scopeRing', () => new THREE.CylinderGeometry(0.0182, 0.0182, 0.016, 32, 1, true).rotateX(Math.PI / 2)), m.anodizedEdge, sc, { pos: [0, cy, zz] });
+    boxes(sc, m.hole, [[0.0372, 0.0012, 0.0165, 0, cy, zz]], 0.0003);
+    mesh(rbox(0.02, cy - 0.016, 0.016, 0.003), m.anodized, sc, { pos: [0, (cy - 0.016) / 2, zz] });
+    mesh(rbox(0.032, 0.008, 0.018, 0.002), m.anodized, sc, { pos: [0, 0.004, zz] });
+    const sp: Part[] = [];
+    for (const s of [-1, 1]) for (const dz of [-0.0045, 0.0045]) sp.push([ccyl(0.0022, 0.0022, 0.003, 10), [s * 0.019, cy, zz + dz], Z90]);
+    merged(sc, m.steel, sp);
+    mesh(cached('scopeNut', () => new THREE.CylinderGeometry(0.0042, 0.0042, 0.004, 6)), m.steel, sc, { pos: [-0.018, 0.005, zz], rot: Z90 });
+  }
+  // flip-up caps: front stands up, rear swings left
+  tube(0.0288, 0.0288, 0.012, -0.18, m.polymer);
+  const fc = group(sc, { pos: [0, cy + 0.03, -0.187], rot: [2.5, 0, 0] });
+  mesh(ccyl(0.029, 0.029, 0.004, 32), m.polymer, fc, { pos: [0, -0.029, -0.002], rot: X90 });
+  mesh(rbox(0.012, 0.006, 0.006, 0.002), m.polymer, sc, { pos: [0, cy + 0.03, -0.184] });
+  tube(0.0222, 0.0222, 0.01, 0.174, m.polymer);
+  const rc = group(sc, { pos: [-0.024, cy, 0.18], rot: [0, -2.4, 0] });
+  mesh(ccyl(0.023, 0.023, 0.004, 32), m.polymer, rc, { pos: [0.023, 0, 0.002], rot: X90 });
+  mesh(rbox(0.006, 0.01, 0.008, 0.002), m.polymer, sc, { pos: [-0.024, cy, 0.178] });
+  group(sc, { pos: [0, cy, 0.17], name: 'sight' });
 }
 
 function reticle(parent: THREE.Object3D, tex: THREE.Texture, size: number, pos: [number, number, number]) {
@@ -153,7 +253,9 @@ function rail(root: THREE.Object3D, m: Materials, y: number, z0: number, z1: num
   for (let z = z0 - 0.006; z > z1; z -= 0.01) mesh(rbox(0.022, 0.0045, 0.0052, 0.0008), m.anodizedEdge, root, { pos: [0, y + 0.0055, z] });
 }
 
-function addMuzzle(muzzle: THREE.Object3D, m: Materials, kind: MuzzleId, style: 'birdcage' | 'slant') {
+type MuzzleStyle = 'birdcage' | 'slant' | 'cone' | 'slotted' | 'brake' | 'cap' | 'prong';
+
+function addMuzzle(muzzle: THREE.Object3D, m: Materials, kind: MuzzleId, style: MuzzleStyle, scale = 1) {
   if (kind === 'suppressor') {
     mesh(cyl(0.02, 0.02, 0.17, 32), m.parkerized, muzzle, { pos: [0, 0, -0.07], rot: X90 });
     mesh(cyl(0.021, 0.021, 0.02, 32), m.steel, muzzle, { pos: [0, 0, 0.012], rot: X90 });
@@ -171,6 +273,11 @@ function addMuzzle(muzzle: THREE.Object3D, m: Materials, kind: MuzzleId, style: 
     }
     mesh(cyl(0.006, 0.006, 0.003, 16), m.hole, muzzle, { pos: [0, 0, -0.0405], rot: X90 });
     muzzle.userData.tip = -0.04;
+    return;
+  }
+  if (style !== 'birdcage' && style !== 'slant') {
+    muzzleDevice(group(muzzle, { scale: [scale, scale, scale] }), m, style);
+    muzzle.userData.tip = 0;
     return;
   }
   if (style === 'birdcage') {
@@ -286,7 +393,7 @@ function buildKR4(m: Materials, cfg: WeaponCfg): THREE.Group {
   mesh(cyl(0.006, 0.006, 0.006), m.steel, root, { pos: [-0.027, 0.018, -0.13], rot: Z90 });
 
   // barrel + muzzle
-  mesh(cyl(0.0095, 0.0095, 0.13, 20), m.parkerized, root, { pos: [0, 0.018, -0.48], rot: X90 });
+  mesh(cyl(0.0095, 0.0095, 0.17, 20), m.parkerized, root, { pos: [0, 0.018, -0.5], rot: X90 });
   mesh(cyl(0.012, 0.012, 0.012, 20), m.parkerized, root, { pos: [0, 0.018, -0.436], rot: X90 });
   const muzzle = group(root, { pos: [0, 0.018, -0.6], name: 'muzzleBase' });
   addMuzzle(muzzle, m, cfg.muzzle, 'birdcage');

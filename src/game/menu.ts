@@ -3,8 +3,8 @@ import type { Game, MatchConfig, Mode, DifficultyId, Settings } from './game';
 import { DIFFICULTIES, MODES } from './game';
 import {
   MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, GOLD_HEADS,
-  camosFor, computeStats, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
-  type Choice, type Loadout, type PrimaryId, type UnlockCtx, type WeaponClassId, type WeaponId,
+  PRIMARY_IDS, camosFor, computeStats, fitsWeapon, fixAttachments, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
+  type Choice, type Loadout, type UnlockCtx, type WeaponClassId, type WeaponId,
 } from './loadout';
 import { buildWeapon, cfgFromLoadout } from './weapons';
 import { buildSoldier } from './soldier';
@@ -12,8 +12,11 @@ import { MAX_LEVEL, MAX_PRESTIGE, xpForLevel } from './progression';
 import { ART_MAX_LEVEL, badgeImg, prestigeName, rankInfo } from './badges';
 import { nextUnlock, unlockTrack } from './unlocks';
 import { BANNERS, GEAR, HEADGEAR, UNIFORMS, bannerUnlocked, playerCard, type Banner } from './cosmetics';
-import { CATEGORIES, CHALLENGES, isDone, statValue, type ChallengeCat } from './challenges';
+import { CHALLENGES, THEMES, TIER_NAMES, cardArt, isDone, statValue } from './challenges';
 import { MAPS } from './maps';
+import { STREAKS, STREAK_ORDER, streakIcon, type StreakId } from './killstreaks';
+
+const CLASS_ORDER: WeaponClassId[] = ['ar', 'smg', 'heavy', 'marksman', 'sniper', 'handgun'];
 
 type Page = 'mp' | 'bots' | 'cac' | 'soldier' | 'challenges' | 'barracks' | 'settings';
 type Tab = Page | 'resume' | 'quit';
@@ -54,7 +57,10 @@ export class Menu {
   private openSlot: string | null = null;
   private editIndex = 0;
   private prestigeArmed = false;
-  private chFilter: ChallengeCat | 'all' | 'open' = 'all';
+  private chFilter: 'all' | 'open' | 'done' = 'all';
+  private cacTab: 'classes' | 'streaks' = 'classes';
+  /** killstreak picks while fewer than three are chosen */
+  private streakDraft: StreakId[] | null = null;
   private preview: Preview | null = null;
 
   constructor(ctx: Ctx) {
@@ -272,7 +278,8 @@ export class Menu {
     return `<h2>SETTINGS</h2><div class="cols2"><div><div class="label">GAME</div><div class="settings">
       <label for="s-sens">SENSITIVITY</label><input id="s-sens" type="range" min="0.2" max="3" step="0.05" value="${s.sensitivity}"><span id="s-sens-v">${s.sensitivity.toFixed(2)}</span>
       <label for="s-fov">FIELD OF VIEW</label><input id="s-fov" type="range" min="65" max="100" step="1" value="${s.fov}"><span id="s-fov-v">${s.fov}°</span>
-      <label for="s-vol">VOLUME</label><input id="s-vol" type="range" min="0" max="1" step="0.05" value="${s.volume}"><span id="s-vol-v">${Math.round(s.volume * 100)}%</span>
+      <label for="s-vol">MASTER VOLUME</label><input id="s-vol" type="range" min="0" max="1" step="0.05" value="${s.volume}"><span id="s-vol-v">${Math.round(s.volume * 100)}%</span>
+      <label for="s-mus">MUSIC</label><input id="s-mus" type="range" min="0" max="1" step="0.05" value="${s.music}"><span id="s-mus-v">${Math.round(s.music * 100)}%</span>
       <label for="s-res">WORLD RESOLUTION</label><select id="s-res">${[240, 360, 480, 720].map((r) => `<option value="${r}" ${s.lowHeight === r ? 'selected' : ''}>${r}p${r === 240 ? ' (true PS1)' : r === 480 ? ' (default)' : ''}</option>`).join('')}</select><span></span>
       <label for="s-dither">DITHERING</label><input id="s-dither" type="checkbox" ${s.dither ? 'checked' : ''}><span></span>
       <label for="s-unlock">UNLOCK ALL (TESTING)</label><input id="s-unlock" type="checkbox" ${s.unlockAll ? 'checked' : ''}><span></span>
@@ -280,7 +287,8 @@ export class Menu {
     <div><div class="label">CONTROLS</div><div class="keys grid-keys">
       <span><b>WASD</b> move</span><span><b>MOUSE</b> aim</span><span><b>LMB</b> fire</span><span><b>RMB</b> aim down sights</span>
       <span><b>SHIFT</b> sprint</span><span><b>SPACE</b> jump</span><span><b>C</b> crouch / slide</span><span><b>R</b> reload</span>
-      <span><b>1 / 2 / WHEEL</b> switch weapon</span><span><b>G</b> frag</span><span><b>Q</b> tactical</span><span><b>4</b> killstreak</span>
+      <span><b>1 / 2 / WHEEL</b> switch weapon</span><span><b>V</b> melee</span><span><b>G</b> frag</span><span><b>Q</b> tactical</span><span><b>4</b> killstreak</span>
+      <span><b>SHIFT (SCOPED)</b> hold breath</span>
       <span><b>TAB</b> scoreboard</span><span><b>ESC</b> pause / back</span></div></div></div>`;
   }
 
@@ -301,10 +309,12 @@ export class Menu {
     const sw = `<i class="sw ${cur.swatch ? '' : 'none'}" style="background:${cur.swatch ?? 'transparent'}"></i>`;
     const choices = open
       ? `<div class="choices">${note ? `<div class="sub" style="grid-column:1/-1">${note}</div>` : ''}${opts
-          .map((o) => {
+          .map((o, i) => {
+            const grp = (o as Choice & { group?: string }).group;
+            const head = grp && grp !== (opts[i - 1] as Choice & { group?: string } | undefined)?.group ? `<div class="choice-group">${grp}</div>` : '';
             const locked = !isUnlocked(o, this.ctxFor(u));
             const prog = locked && o.heads ? `<span class="prog">${Math.min(u.heads ?? 0, o.heads)} / ${o.heads}</span>${bar(((u.heads ?? 0) / o.heads) * 100)}` : '';
-            return `<button type="button" class="card ${current === o.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-${attr}="${key}" data-val="${o.id}">
+            return `${head}<button type="button" class="card ${current === o.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-${attr}="${key}" data-val="${o.id}">
               <b>${o.swatch ? `<i class="sw" style="background:${o.swatch}"></i>` : ''}${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${locked ? `<span class="lock">UNLOCKS · ${lockText(o, weaponName)}</span>${prog}` : ''}</button>`;
           })
           .join('')}</div>`
@@ -320,8 +330,11 @@ export class Menu {
     const heads = p.weaponHeads[w] ?? 0;
     const next = CAMOS.find((c) => (c.heads ?? 0) > heads);
     const rows: [string, string][] = [
-      ['DAMAGE', `${Math.round(st.damageAt(0))} – ${Math.round(st.damageAt(999))}`],
-      ['HEADSHOT', `${Math.round(st.damageAt(0) * 2)}`],
+      st.cls === 'sniper'
+        ? ['DAMAGE', 'ONE SHOT: HEAD, TORSO · TWO: ARMS, LEGS']
+        : ['DAMAGE', `${Math.round(st.damageAt(0))} – ${Math.round(st.damageAt(999))} · LIMBS ${Math.round(st.zoneDamage('limb', 0))}`],
+      ['HEADSHOT', st.cls === 'sniper' ? 'KILL' : `${Math.round(st.zoneDamage('head', 0))} (×${WEAPONS[w].headMult})`],
+      ['CLASS', `${WEAPON_CLASSES[st.cls].name} · ${st.move >= 1 ? 'FAST' : st.move >= 0.95 ? 'STEADY' : 'HEAVY'} MOVEMENT${st.bolt ? ' · BOLT ACTION' : ''}`],
       ['FIRE RATE', `${st.rpm} RPM${st.auto ? '' : ' · SEMI'}`],
       ['MAGAZINE', `${st.mag} + ${st.reserve}`],
       ['RELOAD', `${st.reload.toFixed(1)}s / ${st.reloadEmpty.toFixed(1)}s empty`],
@@ -331,7 +344,38 @@ export class Menu {
     return `<div class="sheet">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>`;
   }
 
+  private cacTabs() {
+    return `<div class="fchips"><button type="button" class="fchip ${this.cacTab === 'classes' ? 'on' : ''}" data-cact="classes">CLASSES</button>
+      <button type="button" class="fchip ${this.cacTab === 'streaks' ? 'on' : ''}" data-cact="streaks">KILLSTREAKS</button></div>`;
+  }
+
+  /** Pick three killstreaks; they apply to every class. */
+  private streaksHtml() {
+    const p = this.ctx.game.profileData;
+    const lvl = this.level();
+    const draft = this.streakDraft ?? [...p.streaks];
+    const cards = STREAK_ORDER.map((id) => {
+      const s = STREAKS[id];
+      const locked = !this.ctx.settings.unlockAll && (s.level ?? 1) > lvl && p.prestige === 0;
+      const slot = draft.indexOf(id);
+      return `<button type="button" class="card streakcard ${slot >= 0 ? 'on' : ''} ${locked ? 'locked' : ''}" data-streak="${id}">
+        <div class="sk-ic">${streakIcon(id, 44)}</div>
+        <b>${s.name}</b><span class="kc">${s.kills} KILLS</span><span>${s.desc}</span>
+        ${locked ? `<span class="lock">UNLOCKS · LVL ${s.level}</span>` : ''}${slot >= 0 ? `<em class="slotn">${slot + 1}</em>` : ''}</button>`;
+    }).join('');
+    const picked = [...draft].sort((a, b) => STREAKS[a].kills - STREAKS[b].kills);
+    const rail = [0, 1, 2]
+      .map((i) => (picked[i] ? `<div class="pick">${streakIcon(picked[i], 30)}<b>${STREAKS[picked[i]].name}</b><span>${STREAKS[picked[i]].kills} KILLS</span></div>` : '<div class="pick empty"><b>EMPTY</b><span>PICK ONE</span></div>'))
+      .join('');
+    return `<h2>CREATE A CLASS</h2><div class="sub">Pick three killstreaks. Earn them with kills in a single life, then press [4] in a match to call in the newest one. They apply to every class.</div>
+      ${this.cacTabs()}
+      <div class="picks">${rail}</div>
+      ${draft.length < 3 ? '<div class="sub" style="color:var(--gold)">Pick one more to save.</div>' : '<div class="sub">Tap a picked streak to swap it out.</div>'}
+      <div class="streakgrid">${cards}</div>`;
+  }
+
   private cacHtml() {
+    if (this.cacTab === 'streaks') return this.streaksHtml();
     const c = this.ctx.classes[this.editIndex];
     const pk = this.ctx.game.profileData.weaponKills;
     const prim = WEAPONS[c.weapon];
@@ -343,15 +387,18 @@ export class Menu {
     const bars = Object.entries(w.bars)
       .map(([k, v]) => `<div class="stat"><span>${k.toUpperCase()}</span><div class="b"><i style="width:${v * 10}%"></i></div></div>`)
       .join('');
-    const primaries: Choice[] = (['kr4', 'vk47'] as PrimaryId[]).map((id) => ({ id, name: WEAPONS[id].name, desc: WEAPONS[id].blurb }));
+    // every primary, grouped by weapon class (the group header is drawn by slotRow)
+    const primaries: (Choice & { group: string })[] = PRIMARY_IDS.map((id) => ({
+      id, name: WEAPONS[id].name, desc: WEAPONS[id].blurb, level: WEAPONS[id].level, group: WEAPON_CLASSES[WEAPONS[id].cls].name,
+    })).sort((a, b) => CLASS_ORDER.indexOf(WEAPONS[a.id].cls) - CLASS_ORDER.indexOf(WEAPONS[b.id].cls));
     const pu = this.weaponCtx(c.weapon);
     const su = this.weaponCtx(c.secondary);
     const rows = [
       `<div class="group-label">PRIMARY · ${primKills} KILLS</div>`,
       this.slotRow('weapon', 'WEAPON', primaries, c.weapon, {}, prim.name),
-      this.slotRow('optic', 'OPTIC', OPTICS, c.optic, pu, prim.name),
+      this.slotRow('optic', 'OPTIC', fitsWeapon(OPTICS, c.weapon), c.optic, pu, prim.name),
       this.slotRow('muzzle', 'MUZZLE', MUZZLES, c.muzzle, pu, prim.name),
-      this.slotRow('under', 'UNDERBARREL', UNDERS, c.under, pu, prim.name),
+      this.slotRow('under', 'UNDERBARREL', fitsWeapon(UNDERS, c.weapon), c.under, pu, prim.name),
       this.slotRow('mag', 'MAGAZINE', MAGS, c.mag, pu, prim.name),
       this.slotRow('camo', 'CAMO', camosFor(c.weapon), c.camo, pu, prim.name),
       `<div class="group-label">SECONDARY · ${secKills} KILLS</div>`,
@@ -368,6 +415,7 @@ export class Menu {
       .map((cl, i) => `<button type="button" class="card ${this.editIndex === i ? 'on' : ''}" data-edit="${i}"><b>${esc(cl.name)}</b><span>${WEAPONS[cl.weapon].name}</span><span>${WEAPONS[cl.secondary].name} · ${TACTICALS.find((t) => t.id === cl.tactical)?.name ?? ''}</span></button>`)
       .join('');
     return `<h2>CREATE A CLASS</h2><div class="sub">${this.context === 'pause' ? 'Changes apply on your next spawn.' : 'Attachments unlock with kills on each gun. Camos unlock with headshot kills.'}</div>
+      ${this.cacTabs()}
       <div class="cac-layout">
         <div class="cac-classes"><div class="label" style="margin-top:0">CLASSES</div>${classList}
           <div class="label">NAME</div><input class="name" id="cname" maxlength="14" aria-label="Class name" value="${esc(c.name)}"></div>
@@ -380,8 +428,8 @@ export class Menu {
   }
 
   private bannerCard(b: Banner, locked: boolean, on: boolean, lockLabel: string) {
-    return `<button type="button" class="bcard ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}">
-      ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}<span class="bname">${b.name}</span>${locked ? `<span class="block">${lockLabel}</span>` : ''}</button>`;
+    return `<button type="button" class="bcard ${b.art ? 'art' : ''} ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}">
+      ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}${b.art ? '' : `<span class="bname">${b.name}</span>`}${locked ? `<span class="block">${lockLabel}</span>` : ''}</button>`;
   }
 
   private soldierHtml() {
@@ -404,37 +452,37 @@ export class Menu {
         </div></div>
       <div class="label">RANK BANNERS</div><div class="banners">${group(rankB, (b) => `LVL ${b.level ?? 1}`)}</div>
       <div class="label">PRESTIGE BANNERS</div><div class="banners">${group(presB, (b) => `PRESTIGE ${b.prestige}`)}</div>
-      <div class="label">CHALLENGE BANNERS · ${chGot} / ${chB.length}</div><div class="banners">${group(chB, () => 'CHALLENGE')}</div>`;
+      <div class="label">CALLING CARDS · ${chGot} / ${chB.length} · EARNED FROM CHALLENGES</div><div class="banners cards">${group(chB, () => 'LOCKED')}</div>`;
   }
 
   private challengesHtml() {
     const p = this.ctx.game.profileData;
     const lvl = this.level();
     const doneN = p.challenges.length;
-    const cats = Object.keys(CATEGORIES) as ChallengeCat[];
-    const chips = (['all', 'open', ...cats] as const)
-      .map((f) => {
-        const label = f === 'all' ? 'ALL' : f === 'open' ? 'IN PROGRESS' : CATEGORIES[f].name;
-        const n = f === 'all' || f === 'open' ? '' : ` ${CHALLENGES.filter((c) => c.cat === f && isDone(p, c)).length}/${CHALLENGES.filter((c) => c.cat === f).length}`;
-        return `<button type="button" class="fchip ${this.chFilter === f ? 'on' : ''}" data-chf="${f}">${label}${n}</button>`;
-      })
+    const chips = (['all', 'open', 'done'] as const)
+      .map((f) => `<button type="button" class="fchip ${this.chFilter === f ? 'on' : ''}" data-chf="${f}">${{ all: 'ALL', open: 'IN PROGRESS', done: 'COMPLETE' }[f]}</button>`)
       .join('');
-    const list = CHALLENGES.filter((c) => (this.chFilter === 'all' ? true : this.chFilter === 'open' ? !isDone(p, c) : c.cat === this.chFilter));
-    const cards = list
-      .map((c) => {
-        const done = isDone(p, c);
-        const v = Math.min(c.target, statValue(p, c.stat, lvl));
-        const b = BANNERS.find((x) => x.challenge === c.id)!;
-        return `<div class="chcard ${done ? 'done' : ''}">
-          <div class="chban" style="background:${b.bg}">${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}<span class="chn">#${String(c.n).padStart(3, '0')}</span>${done ? '<span class="chk">✓</span>' : ''}</div>
-          <div class="chtxt"><b>${c.name}</b><span>${c.desc}</span>${bar((v / c.target) * 100)}
-            <div class="chfoot"><em>${done ? 'COMPLETE' : `${v.toLocaleString()} / ${c.target.toLocaleString()}`}</em><em>+${c.xp} XP · BANNER</em></div></div></div>`;
-      })
-      .join('');
-    return `<h2>CHALLENGES</h2><div class="sub">${doneN} of ${CHALLENGES.length} complete. Every challenge pays XP and unlocks its own banner for your calling card.</div>
+    const keep = (done: boolean) => this.chFilter === 'all' || (this.chFilter === 'done') === done;
+    const sections = THEMES.map((t) => {
+      const list = CHALLENGES.filter((c) => c.theme === t.key && keep(isDone(p, c)));
+      if (!list.length) return '';
+      const got = CHALLENGES.filter((c) => c.theme === t.key && isDone(p, c)).length;
+      const cards = list
+        .map((c) => {
+          const done = isDone(p, c);
+          const v = Math.min(c.target, statValue(p, c.stat, lvl));
+          return `<div class="chcard ${done ? 'done' : ''}">
+            <div class="chban" style="background:url(${cardArt(c.id)}) center / 100% 100% no-repeat, #111">${done ? '<span class="chk">✓</span>' : ''}</div>
+            <div class="chtxt"><span class="tier t${c.tier}">${TIER_NAMES[c.tier - 1]}</span><span>${c.desc}</span>${bar((v / c.target) * 100)}
+              <div class="chfoot"><em>${done ? 'COMPLETE' : `${v.toLocaleString()} / ${c.target.toLocaleString()}`}</em><em>+${c.xp.toLocaleString()} XP · CARD</em></div></div></div>`;
+        })
+        .join('');
+      return `<section class="chtheme"><div class="label">${t.name} · ${got}/5</div><div class="chgrid">${cards}</div></section>`;
+    }).join('');
+    return `<h2>CHALLENGES</h2><div class="sub">${doneN} of ${CHALLENGES.length} complete. Each challenge unlocks its calling card: 20 sets of 5, from a gunmetal frame up to gold mastery.</div>
       ${bar(doneN)}
       <div class="fchips">${chips}</div>
-      <div class="chgrid">${cards || '<div class="sub">Nothing here: every challenge in this list is complete.</div>'}</div>`;
+      ${sections || '<div class="sub">Nothing here yet.</div>'}`;
   }
 
   private camoTrack() {
@@ -553,6 +601,19 @@ export class Menu {
     pick('map', (v) => (this.mapId = v));
     pick('slot', (v) => (this.openSlot = this.openSlot === v ? null : v));
     pick('chf', (v) => (this.chFilter = v as typeof this.chFilter));
+    pick('cact', (v) => (this.cacTab = v as typeof this.cacTab));
+    pick('streak', (v) => {
+      const id = v as StreakId;
+      const draft = this.streakDraft ?? [...g.profileData.streaks];
+      const i = draft.indexOf(id);
+      if (i >= 0) draft.splice(i, 1);
+      else if (draft.length < 3) draft.push(id);
+      if (draft.length === 3) {
+        g.profileData.streaks = draft;
+        g.saveProfileNow();
+        this.streakDraft = null;
+      } else this.streakDraft = draft;
+    });
     pick('edit', (v) => {
       this.editIndex = Number(v);
       this.openSlot = null;
@@ -568,6 +629,7 @@ export class Menu {
         const key = b.dataset.set!;
         c[key] = b.dataset.val!;
         if (c.secondary === 'r357') c.secAttach = 'none';
+        if (key === 'weapon') fixAttachments(this.ctx.classes[this.editIndex]);
         // a new gun keeps its camo only if that camo is earned on the new gun too
         if (key === 'weapon' || key === 'secondary') {
           const camoKey = key === 'weapon' ? 'camo' : 'secCamo';
@@ -606,7 +668,7 @@ export class Menu {
 
     // settings
     const s = this.ctx.settings;
-    const range = (id: string, key: 'sensitivity' | 'fov' | 'volume', fmt: (v: number) => string) => {
+    const range = (id: string, key: 'sensitivity' | 'fov' | 'volume' | 'music', fmt: (v: number) => string) => {
       const i = panel.querySelector(`#${id}`) as HTMLInputElement | null;
       i?.addEventListener('input', () => {
         s[key] = Number(i.value);
@@ -617,6 +679,7 @@ export class Menu {
     range('s-sens', 'sensitivity', (v) => v.toFixed(2));
     range('s-fov', 'fov', (v) => `${v}°`);
     range('s-vol', 'volume', (v) => `${Math.round(v * 100)}%`);
+    range('s-mus', 'music', (v) => `${Math.round(v * 100)}%`);
     panel.querySelector('#s-res')?.addEventListener('change', (e) => {
       s.lowHeight = Number((e.target as HTMLSelectElement).value);
       this.ctx.saveSettings();

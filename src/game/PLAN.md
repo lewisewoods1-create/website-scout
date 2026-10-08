@@ -104,7 +104,37 @@ A small companion that **floats just under the gun** in first person and reacts 
 - Challenges: 100 across combat, weapons, tactics, streaks, matches and career (`challenges.ts`). Each unlocks
   banner #001–#100. Artwork goes in `public/game/banners/ch-NNN.webp`; flip `BANNER_ART_READY` once it's in.
 
-## 6. Suggested order
+## 6. Weapons
+
+Built: 12 primaries in 5 classes plus 2 handguns. Every gun has its own model, stats, kill-based attachments,
+headshot camos and a class mastery camo.
+
+| Class | Guns | Feel |
+|---|---|---|
+| Assault | KR-4 Carbine, VK-47 Rifle | All-rounders |
+| SMG | VX-9 Stinger, SP-45 Rattler | Very fast fire, heavy recoil, low damage, fastest movement |
+| Heavy | LM-5 Brute, PK-7 Anvil | 100-round belts, big damage, hard to control, slow |
+| Marksman | SK-10 Ranger, MK-20 Sentinel | Semi-auto, 2-3 hits |
+| Sniper | Kestrel, Warden .338 (bolt); Talon SR, Vulture (5-round semi) | Head or torso is one shot, arms and legs two; rounds pierce one body |
+
+Damage model: hit zones are head, upper body, lower body and limbs. Head multipliers are 1.25-1.6 by class (was 2x).
+
+### Sidearms to scope (3 more)
+1. **Machine pistol** ("STORM-18"): select-fire 9mm, 18/33 rounds, ~1100 rpm. Close-range panic button; huge recoil.
+   Attachments: stock, ext mag, suppressor. Needs a burst/auto fire mode on secondaries.
+2. **Hand cannon** (".50 BREACHER"): 7 rounds, two body shots up close, slow handling, big muzzle flip.
+   Model: chunky slide, ported barrel. Reuses the P-9 slide/reload animation.
+3. **Sawn-off** ("SHORTY 12"): double-barrel 12 gauge, 2 shells, pellet spread, one-shot inside 6 m.
+   Needs pellet hitscan (8 rays) and a break-open reload animation.
+Open questions: unlock levels, whether sidearms get their own mastery camo (they'd join HANDGUNS), and a launcher slot.
+
+## 7. Killstreaks
+
+Pick 3 in Create a Class > Killstreaks; earned with kills in one life, stacked, [4] calls in the newest.
+Radar Sweep (3), Supply Drop (4), Mortar Strike (5), Sentry Gun (6), Airstrike (7), Attack Drone (9), System Crash (25, ends the match).
+Next: enemy bots using streaks, shooting down the drone, and EMP-style counters.
+
+## 8. Suggested order
 1. Stairs/second floors + 1 new map
 2. Supabase accounts and cloud saves, then public launch of bot mode
 3. Pets v1 (one pet, earned at level 5)
