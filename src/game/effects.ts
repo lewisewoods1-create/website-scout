@@ -74,6 +74,13 @@ export class Effects {
     scene.add(this.worldFlash);
   }
 
+  /** Hide every live effect (map change). */
+  clear() {
+    for (const t of this.tracers) t.m.visible = false;
+    for (const p of this.puffs) p.s.visible = false;
+    for (const d of this.decals) d.visible = false;
+  }
+
   tracer(from: THREE.Vector3, to: THREE.Vector3, enemy = false) {
     const t = this.tracers[this.tracerIdx++ % this.tracers.length];
     t.from.copy(from);

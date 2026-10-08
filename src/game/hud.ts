@@ -69,6 +69,20 @@ const CSS = `
 #hud .end .win { color: #f2d36b; } #hud .end .lose { color: #ff5a3a; }
 #hud .end button { font-family: inherit; font-size: 26px; letter-spacing: 4px; padding: 4px 34px; cursor: pointer;
   background: #f2d36b; color: #1a1210; border: none; box-shadow: 5px 5px 0 #6b1a10; }
+#hud .picker { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+  background: radial-gradient(ellipse at center, rgba(5,3,4,.55), rgba(5,3,4,.85)); pointer-events: auto; }
+#hud .picker h2 { margin: 0; font-size: 44px; font-weight: 800; color: #f2d36b; letter-spacing: 2px; }
+#hud .picker .sub { font-size: 17px; opacity: .75; font-family: 'Barlow', sans-serif; font-weight: 500; }
+#hud .picker .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; padding: 0 16px; }
+#hud .picker button { all: unset; cursor: pointer; width: 230px; padding: 14px 16px; border: 1px solid rgba(232,226,208,.3); background: rgba(12,9,11,.85);
+  display: flex; flex-direction: column; gap: 4px; box-sizing: border-box; transition: border-color .15s, transform .15s; }
+#hud .picker button:hover, #hud .picker button:focus-visible { border-color: #f2d36b; transform: translateY(-3px); }
+#hud .picker button .k { font-size: 14px; color: #f2d36b; letter-spacing: 2px; }
+#hud .picker button b { font-size: 26px; font-weight: 800; letter-spacing: .5px; }
+#hud .picker button span { font-family: 'Barlow', sans-serif; font-weight: 500; font-size: 13px; opacity: .75; line-height: 1.4; }
+#hud .hint { position: absolute; left: 16px; top: 190px; font-size: 13px; opacity: .6; letter-spacing: 1px; }
+#hud .dead .cls { font-size: 16px; opacity: .85; margin-top: 10px; font-family: 'Barlow', sans-serif; }
+#hud .dead .cls b { color: #f2d36b; }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }
 @keyframes blink { 50% { opacity: .4 } }
@@ -114,6 +128,7 @@ export class Hud {
   private tagEls: HTMLDivElement[] = [];
   private board: HTMLDivElement;
   private end: HTMLDivElement;
+  private picker: HTMLDivElement;
   private hitT = 0;
   private bannerT = 0;
   private dmgArcs: { e: HTMLElement; t: number; angle: number }[] = [];
@@ -135,6 +150,7 @@ export class Hud {
     this.ammoW = el('div', 'w', ammo);
     this.reload = el('div', 'reload', this.root, 'RELOADING');
     const rank = el('div', 'rank', this.root);
+    rank.style.display = 'none';
     this.rankText = el('div', '', rank);
     this.rankBar = el('i', '', el('div', 'bar', rank));
     this.score = el('div', 'score', this.root);
@@ -142,11 +158,13 @@ export class Hud {
     this.popups = el('div', 'popups', this.root);
     this.banner = el('div', 'banner', this.root);
     this.streak = el('div', 'streak', this.root);
-    this.dead = el('div', 'dead', this.root, '<div class="t">K.I.A.</div><div class="s"></div>');
+    this.dead = el('div', 'dead', this.root, '<div class="t">K.I.A.</div><div class="s"></div><div class="cls"></div>');
     this.tagLayer = el('div', 'tags', this.root);
     this.match = el('div', 'match', this.root);
     this.board = el('div', 'board', this.root);
     this.end = el('div', 'end', this.root);
+    this.picker = el('div', 'picker', this.root);
+    el('div', 'hint', this.root, 'TAB · SCOREBOARD');
     this.map = el('canvas', 'map', this.root);
     this.map.width = 168;
     this.map.height = 168;
@@ -220,9 +238,22 @@ export class Hud {
     this.dmgArcs.push({ e, t: 1.2, angle });
   }
 
-  deadScreen(show: boolean, text = '') {
+  deadScreen(show: boolean, text = '', classHtml = '') {
     this.dead.style.display = show ? 'flex' : 'none';
-    if (show) (this.dead.querySelector('.s') as HTMLElement).textContent = text;
+    if (!show) return;
+    (this.dead.querySelector('.s') as HTMLElement).textContent = text;
+    const c = this.dead.querySelector('.cls') as HTMLElement;
+    if (c.innerHTML !== classHtml) c.innerHTML = classHtml;
+  }
+
+  /** Choose-class overlay; cards are [title, detail] pairs. */
+  classPicker(cards: [string, string][] | null, onPick?: (i: number) => void, title = 'CHOOSE CLASS', sub = '') {
+    this.picker.style.display = cards ? 'flex' : 'none';
+    if (!cards) return;
+    this.picker.innerHTML = `<h2>${title}</h2><div class="sub">${sub}</div><div class="cards">${cards
+      .map(([t, d], i) => `<button type="button" data-i="${i}"><span class="k">[${i + 1}]</span><b>${t}</b><span>${d}</span></button>`)
+      .join('')}</div>`;
+    this.picker.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => onPick?.(Number(b.dataset.i))));
   }
 
   matchBar(html: string) {

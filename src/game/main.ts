@@ -68,7 +68,9 @@ const menu = new Menu({
   saveSettings,
   startMatch(cfg: MatchConfig) {
     game.startMatch(cfg, classes);
-    lockOrFallback();
+    // class picker is shown in the HUD; pointer locks once a class is chosen
+    menu.close();
+    game.setPaused(false);
   },
   resume() {
     lockOrFallback();
@@ -80,6 +82,8 @@ const menu = new Menu({
   },
 });
 
+game.onClassChosen = () => lockOrFallback();
+
 game.onExit = () => {
   game.quitToMenu();
   menu.open('main');
@@ -89,6 +93,16 @@ document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement === canvas) enterPlay();
   else if (game.phase === 'match' && !menu.isOpen) openPause();
 });
+
+window.addEventListener(
+  'keydown',
+  (e) => {
+    // keep Tab for the scoreboard instead of moving focus out of the game
+    if (e.code === 'Tab' && game.phase === 'match') e.preventDefault();
+    if (game.choosingClass && /^Digit[1-3]$/.test(e.code)) game.chooseClass(Number(e.code.slice(5)) - 1);
+  },
+  { capture: true },
+);
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && game.input.forceActive && !debug && game.phase === 'match' && !menu.isOpen) {

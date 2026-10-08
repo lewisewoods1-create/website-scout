@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HybridRenderer, LAYER_CHAR } from './renderer';
 import { buildMap, raycastBoxes, type GameMap } from './map';
+import { mapById } from './maps';
 import { createMaterials, soldierMaterials } from './materials';
 import { buildSoldier } from './soldier';
 import { Bot, BOT_NAMES, raySphere, type BotWorld, type Combatant, type Difficulty } from './bot';
@@ -11,7 +12,6 @@ import { Input } from './input';
 import { Hud, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
-import { skyTex } from './textures';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
 import { computeStats, loadClasses, type Loadout } from './loadout';
 import { loadProfile, saveProfile, levelForXp, xpForLevel, nextUnlock, UNLOCKS, XP, MAX_LEVEL, type Profile } from './progression';
@@ -33,6 +33,7 @@ export interface MatchConfig {
   mode: Mode;
   difficulty: DifficultyId;
   classIndex: number;
+  mapId: string;
 }
 
 export const DIFFICULTIES: Record<DifficultyId, Difficulty & { label: string }> = {
@@ -92,8 +93,10 @@ export class Game {
   readonly sfx = new Sfx();
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(80, 1, 0.05, 220);
-  private sky = skyTex();
-  private map: GameMap;
+  private map!: GameMap;
+  private hemi = new THREE.HemisphereLight();
+  private sun = new THREE.DirectionalLight();
+  private amb = new THREE.AmbientLight();
   private vm: Viewmodel;
   private gun: Gun;
   private player = new Player();
@@ -107,7 +110,7 @@ export class Game {
 
   private profile: Profile = loadProfile();
   phase: 'attract' | 'match' | 'ended' = 'attract';
-  private cfg: MatchConfig = { mode: 'tdm', difficulty: 'regular', classIndex: 0 };
+  private cfg: MatchConfig = { mode: 'tdm', difficulty: 'regular', classIndex: 0, mapId: 'depot' };
   private classes: Loadout[] = loadClasses();
   private classIdx = 0;
   private pendingClass = -1;
@@ -128,6 +131,10 @@ export class Game {
   private wasFiring = false;
   private deathCam = 0;
   private orbit = 0;
+  /** true while the class picker is up at match start */
+  choosingClass = false;
+  /** main.ts locks the pointer once a class is picked */
+  onClassChosen: () => void = () => {};
   paused = false;
   settings: Settings;
   /** shared with the create-a-class preview */
@@ -148,12 +155,7 @@ export class Game {
     this.scene.environment = env;
     this.scene.environmentIntensity = 0.45;
     this.scene.fog = new THREE.Fog(0x3b2a30, 24, 110);
-
-    const hemi = new THREE.HemisphereLight(0xa592c4, 0x3a2e22, 1.5);
-    const sun = new THREE.DirectionalLight(0xffa860, 2.4);
-    sun.position.set(-40, 22, -12);
-    const amb = new THREE.AmbientLight(0x2c2434, 0.6);
-    for (const l of [hemi, sun, amb]) {
+    for (const l of [this.hemi, this.sun, this.amb]) {
       l.layers.enableAll();
       this.scene.add(l);
     }
@@ -161,7 +163,7 @@ export class Game {
     this.charLight.layers.set(LAYER_CHAR);
     this.scene.add(this.charLight, this.charLight.target);
 
-    this.map = buildMap(this.scene);
+    this.loadMap('depot');
     this.effects = new Effects(this.scene);
     const mats = createMaterials();
     this.materials = mats;
@@ -236,11 +238,40 @@ export class Game {
     return { level: levelForXp(this.profile.xp), ...this.profile };
   }
 
+  /** Swap the arena: rebuild geometry, nav grid, sky, fog and lighting. */
+  loadMap(id: string) {
+    if (this.map?.id === id) return;
+    this.map?.dispose();
+    const def = mapById(id);
+    this.map = buildMap(this.scene, def);
+    if (this.world) this.world.map = this.map;
+    const t = def.theme;
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.setHex(t.fog[0]);
+    fog.near = t.fog[1];
+    fog.far = t.fog[2];
+    this.hemi.color.setHex(t.hemi[0]);
+    this.hemi.groundColor.setHex(t.hemi[1]);
+    this.hemi.intensity = t.hemi[2];
+    this.sun.color.setHex(t.sun[0]);
+    this.sun.intensity = t.sun[1];
+    this.sun.position.set(t.sun[2], t.sun[3], t.sun[4]);
+    this.amb.color.setHex(t.ambient[0]);
+    this.amb.intensity = t.ambient[1];
+    this.effects?.clear();
+  }
+
+  get mapId() {
+    return this.map.id;
+  }
+
   // ------------------------------------------------------------------ phases
 
   /** Menu background: bots fight each other while the camera orbits. */
   startAttract() {
     this.phase = 'attract';
+    this.choosingClass = false;
+    this.hud.classPicker(null);
     this.player.alive = false;
     this.hud.setVisible(false);
     this.hud.endScreen(null);
@@ -258,6 +289,7 @@ export class Game {
   }
 
   startMatch(cfg: MatchConfig, classes: Loadout[]) {
+    this.loadMap(cfg.mapId);
     this.cfg = cfg;
     this.classes = classes;
     this.classIdx = cfg.classIndex;
@@ -289,11 +321,33 @@ export class Game {
       this.world.combatants.push(b);
     });
     for (const b of this.bots) b.spawn(this.pickSpawn(b));
-    this.applyClass(this.classIdx);
-    this.respawnPlayer();
+    this.player.alive = false;
+    this.choosingClass = true;
     this.refreshHud();
     this.hud.setVisible(true);
-    this.hud.showBanner(MODES[cfg.mode].label, `${DIFFICULTIES[cfg.difficulty].label} BOTS · ${this.classes[this.classIdx].name}`, 3);
+    this.hud.classPicker(this.classCards(), (i) => this.chooseClass(i), 'CHOOSE CLASS', `${MODES[cfg.mode].label} · ${mapById(cfg.mapId).name} · ${DIFFICULTIES[cfg.difficulty].label} BOTS`);
+  }
+
+  private classCards(): [string, string][] {
+    return this.classes.map((c) => {
+      const s = computeStats(c);
+      const opt = { iron: 'Iron sights', reflex: 'Reflex', holo: 'Holographic' }[c.optic];
+      const extras = [opt, c.muzzle === 'suppressor' ? 'Suppressor' : '', c.under === 'grip' ? 'Foregrip' : ''].filter(Boolean).join(' · ');
+      return [c.name, `${s.name}<br>${extras}`];
+    });
+  }
+
+  /** Pick from the start-of-match picker and drop in. */
+  chooseClass(i: number) {
+    if (!this.choosingClass || !this.classes[i]) return;
+    this.choosingClass = false;
+    this.classIdx = i;
+    this.pendingClass = -1;
+    this.hud.classPicker(null);
+    this.respawnPlayer();
+    this.hud.showBanner(MODES[this.cfg.mode].label, `${mapById(this.cfg.mapId).name} · ${this.classes[i].name}`, 3);
+    this.sfx.uiSelect();
+    this.onClassChosen();
   }
 
   /** Swap class: applied immediately if dead/at spawn, otherwise next life. */
@@ -658,6 +712,12 @@ export class Game {
   }
 
   private updateMatch(dt: number) {
+    if (this.choosingClass) {
+      // overview while the player picks a class; bots already fighting
+      this.updateAttract(dt);
+      this.timeLeft -= dt;
+      return;
+    }
     const p = this.player;
     const inp = this.input;
     const s = this.settings;
@@ -754,7 +814,10 @@ export class Game {
 
     if (!p.alive) {
       this.respawnT -= dt;
-      this.hud.deadScreen(true, `Killed by ${this.killedBy} · respawning in ${Math.max(0, Math.ceil(this.respawnT))}`);
+      for (let i = 0; i < 3; i++) if (inp.pressed.has(`Digit${i + 1}`)) this.pendingClass = i;
+      const next = this.pendingClass >= 0 ? this.pendingClass : this.classIdx;
+      const cls = this.classes.map((c, i) => (i === next ? `<b>[${i + 1}] ${c.name}</b>` : `[${i + 1}] ${c.name}`)).join(' &nbsp; ');
+      this.hud.deadScreen(true, `Killed by ${this.killedBy} · respawning in ${Math.max(0, Math.ceil(this.respawnT))}`, `NEXT CLASS: ${cls}`);
       if (this.respawnT <= 0) this.respawnPlayer();
     }
     if (this.sweepT > 0) this.sweepT -= dt;
@@ -823,6 +886,6 @@ export class Game {
   }
 
   render() {
-    this.renderer.render(this.scene, this.camera, this.sky, this.vm.scene, this.vm.camera);
+    this.renderer.render(this.scene, this.camera, this.map.sky, this.vm.scene, this.vm.camera);
   }
 }

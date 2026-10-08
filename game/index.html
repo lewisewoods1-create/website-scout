@@ -50,7 +50,7 @@
       /* ---------- menu shell ---------- */
       #menu { position: fixed; inset: 0; z-index: 10; display: none; font-family: var(--body);
         background: linear-gradient(90deg, rgba(5,3,4,.92) 0%, rgba(5,3,4,.7) 38%, rgba(5,3,4,.15) 70%, rgba(5,3,4,.45) 100%); }
-      #menu.open { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 28px; padding: 34px 40px 80px; box-sizing: border-box; }
+      #menu.open { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 28px; padding: 34px 40px 30px; box-sizing: border-box; }
       #menu .left { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
       #menu .left .title { font-size: clamp(44px, 5.4vw, 74px); }
       #menu .tag { font-family: var(--display); font-weight: 600; font-size: 16px; letter-spacing: 5px; color: var(--dim); margin-top: -10px; }
@@ -102,6 +102,44 @@
       .keys { font-size: 13px; color: var(--dim); margin-top: 14px; line-height: 1.35; }
       .keys b { color: var(--gold); font-weight: normal; }
       input.name { font-family: var(--display); font-weight: 700; font-size: 18px; background: rgba(0,0,0,.4); color: var(--gold); border: 1px solid var(--line); padding: 4px 8px; width: 220px; max-width: 100%; }
+      /* rank card */
+      #menu .rank { margin-top: auto; border: 1px solid var(--line); background: var(--panel); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+      #menu .rk-top { display: flex; gap: 14px; align-items: center; }
+      #menu .rk-lvl { font-family: var(--display); font-weight: 800; font-size: 46px; line-height: 1; color: #1a1210; background: var(--gold);
+        min-width: 64px; text-align: center; padding: 4px 6px; clip-path: polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%); }
+      #menu .rk-label { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 2px; color: var(--dim); }
+      #menu .rk-xp { font-family: var(--display); font-weight: 700; font-size: 22px; font-variant-numeric: tabular-nums; }
+      #menu .rk-bar { height: 8px; background: rgba(255,255,255,.1); }
+      #menu .rk-bar i { display: block; height: 100%; background: linear-gradient(90deg, #c9a24a, var(--gold)); }
+      #menu .rk-next { font-size: 13px; color: var(--dim); letter-spacing: 1px; }
+      #menu .rk-next b { color: var(--ink); font-family: var(--display); font-weight: 700; font-size: 16px; letter-spacing: .5px; }
+      #menu .rk-stats { font-size: 12px; color: var(--dim); letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+      /* maps */
+      .maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+      .card.map { padding: 0 0 10px; overflow: hidden; }
+      .card.map .thumb { display: block; height: 64px; margin-bottom: 6px; }
+      .card.map b, .card.map span { padding: 0 12px; }
+      /* create a class */
+      .row input.name { align-self: stretch; }
+      .studio { position: relative; margin: 14px 0 10px; border: 1px solid var(--line);
+        background: radial-gradient(ellipse at 50% 40%, #d8d3c9 0%, #9b958a 60%, #5e5952 100%); }
+      .studio .preview { display: block; width: 100%; aspect-ratio: 21 / 8; border: 0; background: none; }
+      .studio-info { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+        background: rgba(12,9,11,.85); padding: 8px 12px; border-top: 1px solid var(--line); }
+      .studio-info b { flex: 0 0 auto; margin-right: 6px; }
+      .studio-info .stat { flex: 1 1 80px; grid-template-columns: 1fr; gap: 3px; }
+      .studio-info b { font-family: var(--display); font-weight: 800; font-size: 20px; color: var(--gold); }
+      .slots { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+      .slot { all: unset; cursor: pointer; display: grid; grid-template-columns: 120px 1fr 24px; align-items: center; gap: 10px; padding: 10px 6px;
+        border-bottom: 1px solid var(--line); }
+      .slot:hover, .slot:focus-visible, .slot.open { background: rgba(242,211,107,.08); }
+      .slot .sl { font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 2px; color: var(--dim); }
+      .slot .sv { font-family: var(--display); font-weight: 700; font-size: 20px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .slot .chev { font-family: var(--display); font-size: 22px; color: var(--gold); text-align: center; }
+      .sw { display: inline-block; width: 18px; height: 18px; border: 1px solid rgba(255,255,255,.35); flex: none; }
+      .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; padding: 10px 6px 14px; border-bottom: 1px solid var(--line); }
+      .choices .card b { display: flex; align-items: center; gap: 8px; }
+      .choices .card .sw { margin-bottom: 4px; }
       @media (max-width: 760px) {
         #menu.open { grid-template-columns: 1fr; padding: 20px 16px 80px; overflow: auto; }
         #menu .panel { justify-self: stretch; max-height: none; }

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ps1ify, LAYER_WORLD } from './renderer';
-import * as T from './textures';
 
 export type Surface = 'concrete' | 'metal' | 'wood' | 'dirt';
 
@@ -11,20 +10,43 @@ export interface Box {
   surface: Surface;
 }
 
-export interface GameMap {
-  boxes: Box[];
-  spawns: THREE.Vector3[];
-  half: number;
-  lights: THREE.Light[];
-  nav: NavGrid;
-}
-
-interface MatDef {
+export interface MatDef {
   tex: THREE.Texture;
   /** metres per texture repeat */
   scale: number;
   surface: Surface;
   emissive?: number;
+}
+
+export interface MapTheme {
+  sky: () => THREE.Texture;
+  fog: [color: number, near: number, far: number];
+  hemi: [sky: number, ground: number, intensity: number];
+  sun: [color: number, intensity: number, x: number, y: number, z: number];
+  ambient: [color: number, intensity: number];
+}
+
+export interface MapDef {
+  id: string;
+  name: string;
+  desc: string;
+  /** shown on the map card */
+  swatch: string;
+  half: number;
+  theme: MapTheme;
+  materials(): Record<string, MatDef>;
+  layout(b: MapBuilder): void;
+}
+
+export interface GameMap {
+  id: string;
+  boxes: Box[];
+  spawns: THREE.Vector3[];
+  half: number;
+  root: THREE.Group;
+  nav: NavGrid;
+  sky: THREE.Texture;
+  dispose(): void;
 }
 
 /**
@@ -51,10 +73,10 @@ function worldBox(cx: number, cy: number, cz: number, w: number, h: number, d: n
   return g;
 }
 
-class MapBuilder {
+export class MapBuilder {
   boxes: Box[] = [];
+  readonly root = new THREE.Group();
   private geos = new Map<string, THREE.BufferGeometry[]>();
-
   private defs: Record<string, MatDef>;
 
   constructor(defs: Record<string, MatDef>) {
@@ -76,176 +98,134 @@ class MapBuilder {
     }
   }
 
+  /** Upright cylinder (tank, drum, tower leg) with a square collider. */
+  cyl(mat: string, x: number, z: number, r: number, h: number, y = 0, collide = true, seg = 10) {
+    const g = new THREE.CylinderGeometry(r, r, h, seg, Math.max(1, Math.ceil(h / 2)));
+    g.translate(x, y + h / 2, z);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * Math.max(1, Math.round(r * 2.5)), (uv.getY(i) * h) / 2);
+    this.extra(mat, g);
+    if (collide) {
+      const c = r * 0.92;
+      this.boxes.push({ min: new THREE.Vector3(x - c, y, z - c), max: new THREE.Vector3(x + c, y + h, z + c), surface: this.defs[mat].surface });
+    }
+  }
+
   extra(mat: string, g: THREE.BufferGeometry) {
     const list = this.geos.get(mat) ?? [];
     list.push(g.index ? g.toNonIndexed() : g);
     this.geos.set(mat, list);
   }
 
-  build(scene: THREE.Scene) {
+  light(l: THREE.Light) {
+    l.layers.enableAll();
+    this.root.add(l);
+  }
+
+  build() {
     for (const [key, list] of this.geos) {
       const def = this.defs[key];
-      const nonIndexed = list.map((g) => (g.index ? g.toNonIndexed() : g));
-      const merged = mergeGeometries(nonIndexed, false);
+      const merged = mergeGeometries(list.map((g) => (g.index ? g.toNonIndexed() : g)), false);
       const mat = ps1ify(
-        new THREE.MeshLambertMaterial({
-          map: def.tex,
-          emissive: def.emissive ?? 0,
-          emissiveIntensity: def.emissive ? 1.5 : 0,
-        }),
+        new THREE.MeshLambertMaterial({ map: def.tex, emissive: def.emissive ?? 0, emissiveIntensity: def.emissive ? 1.5 : 0 }),
       );
       const m = new THREE.Mesh(merged, mat);
       m.layers.set(LAYER_WORLD);
       m.matrixAutoUpdate = false;
-      scene.add(m);
+      this.root.add(m);
     }
   }
 }
 
+// ---------------------------------------------------------------- layout helpers
+
 /** Shipping container, length along X unless rotated. */
-function container(b: MapBuilder, mat: string, x: number, z: number, alongZ: boolean, level = 0) {
+export function container(b: MapBuilder, mat: string, x: number, z: number, alongZ: boolean, level = 0) {
   const L = 6.06;
   const W = 2.44;
   const H = 2.59;
   b.box(mat, x, level * H, z, alongZ ? W : L, H, alongZ ? L : W);
 }
 
-function crate(b: MapBuilder, x: number, z: number, level = 0, s = 1.2) {
-  b.box('crate', x, level * s, z, s, s, s);
+export function crate(b: MapBuilder, x: number, z: number, level = 0, s = 1.2, mat = 'crate') {
+  b.box(mat, x, level * s, z, s, s, s);
 }
 
-export function buildMap(scene: THREE.Scene): GameMap {
-  const defs: Record<string, MatDef> = {
-    ground: { tex: T.groundTex(), scale: 4, surface: 'dirt' },
-    concrete: { tex: T.concreteTex(1), scale: 3, surface: 'concrete' },
-    concreteDark: { tex: T.concreteTex(5, '#5a5752'), scale: 2.5, surface: 'concrete' },
-    red: { tex: T.containerTex('#7a2a20', 31), scale: 2.6, surface: 'metal' },
-    blue: { tex: T.containerTex('#24486b', 32), scale: 2.6, surface: 'metal' },
-    green: { tex: T.containerTex('#3b5233', 33), scale: 2.6, surface: 'metal' },
-    crate: { tex: T.crateTex(), scale: 1.2, surface: 'wood' },
-    metal: { tex: T.metalTex(), scale: 2, surface: 'metal' },
-    hazard: { tex: T.hazardTex(), scale: 1, surface: 'concrete' },
-    lamp: { tex: T.metalTex(12, '#ffcf7a'), scale: 1, surface: 'metal', emissive: 0xffb050 },
-  };
-  const b = new MapBuilder(defs);
-  const HALF = 32;
+/** Ground slab plus four boundary walls. */
+export function arena(b: MapBuilder, half: number, ground: string, wall: string, wallH: number) {
+  b.box(ground, 0, -0.5, 0, half * 2, 0.5, half * 2);
+  b.box(wall, 0, 0, -half - 0.5, half * 2 + 2, wallH, 1);
+  b.box(wall, 0, 0, half + 0.5, half * 2 + 2, wallH, 1);
+  b.box(wall, -half - 0.5, 0, 0, 1, wallH, half * 2);
+  b.box(wall, half + 0.5, 0, 0, 1, wallH, half * 2);
+}
 
-  // ground slab (thin box so it collides and textures like the rest)
-  b.box('ground', 0, -0.5, 0, HALF * 2, 0.5, HALF * 2);
-
-  // perimeter walls
-  const WH = 5;
-  b.box('concrete', 0, 0, -HALF - 0.5, HALF * 2 + 2, WH, 1);
-  b.box('concrete', 0, 0, HALF + 0.5, HALF * 2 + 2, WH, 1);
-  b.box('concrete', -HALF - 0.5, 0, 0, 1, WH, HALF * 2);
-  b.box('concrete', HALF + 0.5, 0, 0, 1, WH, HALF * 2);
-  // wall caps + hazard base strip
-  for (const s of [-1, 1]) {
-    b.box('hazard', 0, 0, s * (HALF - 0.05), HALF * 2, 0.6, 0.1, false);
-    b.box('hazard', s * (HALF - 0.05), 0, 0, 0.1, 0.6, HALF * 2, false);
-  }
-
-  // --- warehouse office (x -6..6, z -18..-10)
-  const bx0 = -6;
-  const bx1 = 6;
-  const bz0 = -18;
-  const bz1 = -10;
-  const BH = 3.4;
+/**
+ * Four-walled building with door gaps. doors: any of 'n' 's' 'e' 'w'
+ * (n = -z side). Optional flat roof.
+ */
+export function house(b: MapBuilder, mat: string, cx: number, cz: number, w: number, d: number, h: number, doors: string, roof?: string) {
   const t = 0.35;
-  b.box('concreteDark', 0, 0, bz0, bx1 - bx0, BH, t); // north wall
-  // south wall with a central door (1.6 wide)
-  b.box('concreteDark', -3.4, 0, bz1, 5.2, BH, t);
-  b.box('concreteDark', 3.4, 0, bz1, 5.2, BH, t);
-  b.box('concreteDark', 0, 2.3, bz1, 1.6, BH - 2.3, t);
-  // west wall with window (z -15..-13, sill 1.0 lintel 2.1)
-  b.box('concreteDark', bx0, 0, -16.5, t, BH, 3);
-  b.box('concreteDark', bx0, 0, -11.5, t, BH, 3);
-  b.box('concreteDark', bx0, 0, -14, t, 1.0, 2);
-  b.box('concreteDark', bx0, 2.1, -14, t, BH - 2.1, 2);
-  // east wall with door (z -15..-13.6)
-  b.box('concreteDark', bx1, 0, -16.6, t, BH, 2.8);
-  b.box('concreteDark', bx1, 0, -11.7, t, BH, 3.4);
-  b.box('concreteDark', bx1, 2.3, -14.3, t, BH - 2.3, 1.4);
-  // interior divider + roof
-  b.box('concreteDark', -1.5, 0, -15.2, 0.25, BH, 5.6);
-  b.box('metal', 0, BH, (bz0 + bz1) / 2, bx1 - bx0 + 0.6, 0.3, bz1 - bz0 + 0.6);
-  crate(b, 3.5, -16.8);
-  crate(b, 4.7, -16.8);
-  crate(b, 3.5, -16.8, 1);
-  b.box('metal', -4, 0, -16.9, 2.6, 0.9, 0.9); // workbench
+  const DW = 1.6;
+  const DH = 2.3;
+  const side = (alongX: boolean, fixed: number, from: number, to: number, door: boolean) => {
+    const len = to - from;
+    const mid = (from + to) / 2;
+    const put = (c: number, l: number, y: number, hh: number) =>
+      alongX ? b.box(mat, c, y, fixed, l, hh, t) : b.box(mat, fixed, y, c, t, hh, l);
+    if (!door) return put(mid, len, 0, h);
+    const seg = (len - DW) / 2;
+    put(mid - DW / 2 - seg / 2, seg, 0, h);
+    put(mid + DW / 2 + seg / 2, seg, 0, h);
+    put(mid, DW, DH, h - DH);
+  };
+  side(true, cz - d / 2, cx - w / 2, cx + w / 2, doors.includes('n'));
+  side(true, cz + d / 2, cx - w / 2, cx + w / 2, doors.includes('s'));
+  side(false, cx - w / 2, cz - d / 2 + t / 2, cz + d / 2 - t / 2, doors.includes('w'));
+  side(false, cx + w / 2, cz - d / 2 + t / 2, cz + d / 2 - t / 2, doors.includes('e'));
+  if (roof) b.box(roof, cx, h, cz, w + 0.5, 0.3, d + 0.5);
+}
 
-  // --- containers
-  container(b, 'red', -20, -18, false);
-  container(b, 'blue', -20, -18, false, 1);
-  container(b, 'green', -24, 4, true);
-  container(b, 'blue', -14, 10, false);
-  container(b, 'red', 18, -20, true);
-  container(b, 'green', 22, 6, false);
-  container(b, 'red', 10, 18, false);
-  container(b, 'blue', 24, -6, true);
-  container(b, 'green', 24, -6, true, 1);
-  container(b, 'red', -18, 24, false);
-  container(b, 'blue', -4, 26, true);
-
-  // --- crate clusters
-  crate(b, -6, 4);
-  crate(b, -4.8, 4);
-  crate(b, -6, 5.2);
-  crate(b, -6, 4, 1);
-  crate(b, 8, 2);
-  crate(b, 12, -6);
-  crate(b, 12, -4.8);
-  crate(b, 12, -6, 1);
-  crate(b, -16, -6);
-  crate(b, -17.2, -6);
-  crate(b, 4, 12);
-  crate(b, -10, 20);
-  crate(b, 16, 25);
-  crate(b, 17.2, 25);
-  crate(b, 27, 14);
-  crate(b, -27, -10);
-  crate(b, -27, -11.2);
-
-  // --- jersey barriers
-  b.box('concrete', 0, 0, 4, 3, 0.9, 0.6);
-  b.box('concrete', -4, 0, 15, 0.6, 0.9, 3);
-  b.box('concrete', 15, 0, 11, 3, 0.9, 0.6);
-  b.box('concrete', -20, 0, -6, 3, 0.9, 0.6);
-  b.box('concrete', 8, 0, -24, 0.6, 0.9, 3);
-  b.box('concrete', -10, 0, -26, 3, 0.9, 0.6);
-  b.box('concrete', 20, 0, 18, 0.6, 0.9, 3);
-
-  // --- fuel tanks (cylinder visuals, box colliders)
-  const tankMat = 'metal';
-  for (const [x, z] of [[25, 23], [21, 26]] as const) {
-    const g = new THREE.CylinderGeometry(1.5, 1.5, 3.2, 10, 2);
-    g.translate(x, 1.6, z);
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 4, uv.getY(i) * 1.6);
-    b.extra(tankMat, g);
-    b.boxes.push({ min: new THREE.Vector3(x - 1.4, 0, z - 1.4), max: new THREE.Vector3(x + 1.4, 3.2, z + 1.4), surface: 'metal' });
+/** Build a map from its definition into its own root group. */
+export function buildMap(scene: THREE.Scene, def: MapDef): GameMap {
+  const b = new MapBuilder(def.materials());
+  def.layout(b);
+  b.build();
+  scene.add(b.root);
+  const nav = new NavGrid(b.boxes, def.half);
+  // spawn ring around the edge plus a few inner points, snapped to open ground
+  const spawns: THREE.Vector3[] = [];
+  for (const inset of [3.5, 13]) {
+    const r = def.half - inset;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const k = Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
+      const c = nav.nearestWalkable((Math.cos(a) / k) * r, (Math.sin(a) / k) * r);
+      if (c) spawns.push(nav.center(c[0], c[1]));
+    }
   }
-
-  // --- sodium lamp posts
-  const lights: THREE.Light[] = [];
-  for (const [x, z] of [[-10, 0], [10, -10], [6, 14], [-22, 14], [20, -26]] as const) {
-    b.box('metal', x, 0, z, 0.22, 5.2, 0.22);
-    b.box('metal', x + 0.6, 5.0, z, 1.4, 0.15, 0.25, false);
-    b.box('lamp', x + 1.15, 4.85, z, 0.45, 0.15, 0.3, false);
-    const pl = new THREE.PointLight(0xffa040, 18, 14, 1.6);
-    pl.position.set(x + 1.15, 4.6, z);
-    pl.layers.enableAll();
-    lights.push(pl);
-    scene.add(pl);
-  }
-
-  b.build(scene);
-
-  const spawns = [
-    [-28, -28], [28, -28], [-28, 28], [28, 28], [0, 29], [0, -28], [-29, 0], [29, 0], [0, 0], [14, -14], [-12, -2], [8, 22],
-  ].map(([x, z]) => new THREE.Vector3(x, 0, z));
-
-  return { boxes: b.boxes, spawns, half: HALF, lights, nav: new NavGrid(b.boxes, HALF) };
+  const sky = def.theme.sky();
+  return {
+    id: def.id,
+    boxes: b.boxes,
+    spawns,
+    half: def.half,
+    root: b.root,
+    nav,
+    sky,
+    dispose() {
+      scene.remove(b.root);
+      b.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) {
+          m.geometry.dispose();
+          (m.material as THREE.MeshLambertMaterial).map?.dispose();
+          (m.material as THREE.Material).dispose();
+        }
+      });
+      sky.dispose();
+    },
+  };
 }
 
 // ---------------------------------------------------------------- navigation

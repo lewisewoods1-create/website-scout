@@ -571,3 +571,162 @@ export function dotReticleTex() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+// ---------------------------------------------------------------- map pool
+
+export interface SkyStyle {
+  stops: [number, string][];
+  sun: { u: number; v: number; r: number; color: string } | null;
+  clouds: { color: string; count: number; v0: number; v1: number };
+  skyline: string | null;
+}
+
+/** Parameterised low-res equirect sky. Horizon sits at v = 0.5. */
+export function skyThemed(style: SkyStyle, seed = 99) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(256, 128);
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  for (const [o, col] of style.stops) g.addColorStop(o, col);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 128);
+  if (style.sun) {
+    const s = style.sun;
+    const rg = ctx.createRadialGradient(s.u * 256, s.v * 128, 0, s.u * 256, s.v * 128, s.r * 4);
+    rg.addColorStop(0, s.color);
+    rg.addColorStop(0.25, s.color);
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, 256, 128);
+  }
+  for (let i = 0; i < style.clouds.count; i++) {
+    ctx.globalAlpha = 0.06 + rnd() * 0.18;
+    ctx.fillStyle = style.clouds.color;
+    ctx.fillRect(rnd() * 256, (style.clouds.v0 + rnd() * (style.clouds.v1 - style.clouds.v0)) * 128, 20 + rnd() * 60, 1 + rnd() * 3);
+  }
+  ctx.globalAlpha = 1;
+  if (style.skyline) {
+    ctx.fillStyle = style.skyline;
+    let x = 0;
+    while (x < 256) {
+      const w = 4 + rnd() * 12;
+      const h = 1 + rnd() * 7;
+      ctx.fillRect(x, 64 - h, w, h + 2);
+      x += w;
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export function sandTex(seed = 81) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#c4a26e';
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.16, 1);
+  noise(ctx, 64, 64, rnd, 0.1, 4);
+  // wind ripples
+  ctx.strokeStyle = 'rgba(120,90,50,0.25)';
+  for (let y = 4; y < 64; y += 7) {
+    ctx.beginPath();
+    for (let x = 0; x <= 64; x += 4) ctx.lineTo(x, y + Math.sin(x * 0.2 + y) * 1.5);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = rnd() > 0.5 ? '#8f7550' : '#dcc196';
+    ctx.fillRect(rnd() * 64, rnd() * 64, 1, 1);
+  }
+  return retro(c);
+}
+
+/** Mud-brick / plaster wall with exposed bricks. */
+export function adobeTex(seed = 82, base = '#b48a5e') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.14, 2);
+  for (let i = 0; i < 4; i++) {
+    const x = rnd() * 48;
+    const y = rnd() * 48;
+    for (let r = 0; r < 3; r++) {
+      for (let k = 0; k < 2; k++) {
+        ctx.fillStyle = 'rgba(110,70,40,0.6)';
+        ctx.fillRect(x + k * 9 + (r % 2) * 4, y + r * 5, 8, 4);
+      }
+    }
+  }
+  const g = ctx.createLinearGradient(0, 40, 0, 64);
+  g.addColorStop(0, 'rgba(70,45,25,0)');
+  g.addColorStop(1, 'rgba(70,45,25,0.35)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return retro(c);
+}
+
+export function canvasTex(color: string, seed = 83) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(32, 32);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 32, 32);
+  for (let x = 0; x < 32; x += 8) {
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x, 0, 4, 32);
+  }
+  noise(ctx, 32, 32, rnd, 0.12, 1);
+  return retro(c);
+}
+
+export function snowTex(seed = 84) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#dfe6ee';
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.08, 1);
+  noise(ctx, 64, 64, rnd, 0.06, 8);
+  // boot prints + tire tracks
+  for (let i = 0; i < 14; i++) {
+    ctx.fillStyle = 'rgba(120,135,155,0.3)';
+    ctx.fillRect(rnd() * 64, rnd() * 64, 2, 3);
+  }
+  ctx.fillStyle = 'rgba(130,145,165,0.18)';
+  ctx.fillRect(18, 0, 4, 64);
+  ctx.fillRect(28, 0, 4, 64);
+  return retro(c);
+}
+
+/** Painted research-station cladding: white panels with a hazard-orange band. */
+export function hutTex(seed = 85, band = '#d0562a') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#c9cdd0';
+  ctx.fillRect(0, 0, 64, 64);
+  for (let x = 0; x < 64; x += 16) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(x, 0, 1, 64);
+  }
+  ctx.fillStyle = band;
+  ctx.fillRect(0, 30, 64, 10);
+  noise(ctx, 64, 64, rnd, 0.12, 2);
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = 'rgba(110,70,40,0.35)';
+    ctx.fillRect(rnd() * 64, 40 + rnd() * 20, 1, 4 + rnd() * 10);
+  }
+  return retro(c);
+}
+
+export function drumTex(color: string, seed = 86) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(32, 32);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for (const y of [6, 16, 26]) ctx.fillRect(0, y, 32, 2);
+  noise(ctx, 32, 32, rnd, 0.18, 1);
+  return retro(c);
+}

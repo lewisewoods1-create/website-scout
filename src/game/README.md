@@ -19,8 +19,9 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | File | What |
 |---|---|
 | `game.ts` | Orchestrates player, gun, bots, XP and HUD; handles shooting and damage |
-| `map.ts` | "Depot" arena (merged, textured box geometry), AABB colliders, 1m nav grid + A*, ray vs box |
-| `rifle.ts` | Procedural AR-pattern carbine, ~200 parts, holo sight with reticle |
+| `map.ts` / `maps.ts` | Map builder (merged, textured box geometry), AABB colliders, 1m nav grid + A*, ray vs box; map pool with themes |
+| `weapons.ts` | Procedural KR-4 (AR) and VK-47 (AK), 150–250 parts each, with optics, suppressor, foregrip and camos |
+| `loadout.ts`, `menu.ts` | Create-a-class data and stats; menus, class editor and 3D preview |
 | `hands.ts` | Gloved hands with articulated fingers, attached to the rifle |
 | `soldier.ts` | Fully kitted operator: plate carrier, MOLLE, pouches, helmet + NVG, IK arms |
 | `viewmodel.ts` | First-person animation: sway, bob, ADS, recoil, reload, muzzle flash, brass. `Gun` holds the fire control |
@@ -31,8 +32,4 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 
 ## Roadmap
 
-- **Phase 1:** create-a-class, more weapons and attachments unlocked by challenges, perks, profile in Supabase.
-- **Phase 2:** multiplayer (Colyseus, authoritative server, 6v6 TDM).
-- **Phase 3:** earned supply crates (cosmetics only, odds shown), camos and skins.
-- **Phase 4:** prestige, more killstreaks, daily and weekly challenges.
-- **Phase 5:** direct-purchase cosmetic store and season pass (no paid random crates).
+See [PLAN.md](./PLAN.md) for the web launch, multiplayer, map pool and pets plans.
