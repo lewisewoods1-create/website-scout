@@ -19,6 +19,8 @@ export class Player {
   private slideDir = new THREE.Vector3();
   sprinting = false;
   health = 100;
+  maxHealth = 100;
+  speedMult = 1;
   lastHit = -99;
   alive = true;
   /** set by update() when landing hard (fall speed, m/s) */
@@ -42,7 +44,7 @@ export class Player {
     this.vel.set(0, 0, 0);
     this.yaw = yaw;
     this.pitch = 0;
-    this.health = 100;
+    this.health = this.maxHealth;
     this.alive = true;
     this.crouchT = 0;
     this.slide = 0;
@@ -79,6 +81,7 @@ export class Player {
     if (this.sprinting) maxSpeed = 7.0;
     if (this.crouchT > 0.5) maxSpeed = 2.4;
     if (aiming) maxSpeed = Math.min(maxSpeed, 2.9);
+    maxSpeed *= this.speedMult;
 
     if (this.slide > 0) {
       this.slide -= dt;
@@ -109,8 +112,8 @@ export class Player {
     if (this.onGround) this.stepDist += this.speed * dt;
 
     // passive health regen after 4.5s out of combat
-    if (this.alive && now - this.lastHit > 4.5 && this.health < 100) {
-      this.health = clamp(this.health + 40 * dt, 0, 100);
+    if (this.alive && now - this.lastHit > 4.5 && this.health < this.maxHealth) {
+      this.health = clamp(this.health + 40 * dt, 0, this.maxHealth);
     }
   }
 

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { Materials } from './materials';
-import { buildRifle } from './rifle';
+import { buildWeapon, type WeaponCfg } from './weapons';
 import { attachHands } from './hands';
-import { group, mesh, orientLimb, rbox, solveTwoBone } from './util';
+import { bakeStatic, group, mesh, orientLimb, rbox, solveTwoBone } from './util';
 
 const unitLimb = new Map<string, THREE.BufferGeometry>();
 /** Unit-height tapered cylinder (scaled along Y by orientLimb). */
@@ -60,7 +60,7 @@ function arm(
  * Fully kitted operator built from ~250 parts. Faces +Z, origin at the feet.
  * Named pivots for animation: hips, torso, head, thighL/R, kneeL/R, rifle.
  */
-export function buildSoldier(m: Materials, variant: 0 | 1 = 0): THREE.Group {
+export function buildSoldier(m: Materials, variant: 0 | 1, weapon: WeaponCfg): THREE.Group {
   const root = new THREE.Group();
   root.name = 'soldier';
   const uniform = variant ? m.camoAlt : m.camo;
@@ -177,7 +177,7 @@ export function buildSoldier(m: Materials, variant: 0 | 1 = 0): THREE.Group {
   mesh(rbox(0.008, 0.008, 0.004, 0.002), m.lens, helm, { pos: [0.05, 0.11, -0.08] }); // IR strobe
 
   // rifle + hands + IK arms
-  const rifle = buildRifle(m, null);
+  const rifle = buildWeapon(m, weapon, false);
   rifle.name = 'rifle';
   rifle.rotation.y = Math.PI;
   rifle.position.set(-0.12, 0.5, 0.36);
@@ -190,6 +190,7 @@ export function buildSoldier(m: Materials, variant: 0 | 1 = 0): THREE.Group {
   arm(torso, m, new THREE.Vector3(-0.2, 0.46, 0), wristR, new THREE.Vector3(-0.5, 0.0, -0.1), uniform);
   arm(torso, m, new THREE.Vector3(0.19, 0.46, 0.06), wristL, new THREE.Vector3(0.45, 0.1, 0.1), uniform);
 
+  bakeStatic(root, ['hips', 'torso', 'head', 'thighL', 'thighR', 'kneeL', 'kneeR']);
   root.traverse((o) => {
     o.frustumCulled = false;
   });

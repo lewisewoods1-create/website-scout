@@ -48,6 +48,27 @@ const CSS = `
 #hud .dead { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
   background: rgba(60,0,0,.35); font-size: 30px; }
 #hud .dead .t { font-size: 64px; color: #ff5a3a; letter-spacing: 4px; }
+#hud .match { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; font-size: 26px; }
+#hud .match .a { color: #7ec8ff; } #hud .match .e { color: #ff6b4a; } #hud .match .clock { font-size: 22px; opacity: .85; }
+#hud .match .bar { width: 110px; height: 6px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2); }
+#hud .match .bar i { display: block; height: 100%; }
+#hud .tags { position: absolute; inset: 0; }
+#hud .tags div { position: absolute; transform: translate(-50%, -100%); font-size: 18px; white-space: nowrap; }
+#hud .tags .f { color: #7ec8ff; } #hud .tags .e { color: #ff5a3a; }
+#hud .tags .f::after { content: ''; display: block; margin: 1px auto 0; width: 0; border: 5px solid transparent; border-top-color: #7ec8ff; }
+#hud .board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(8,8,10,.86);
+  border: 1px solid rgba(232,226,208,.3); padding: 14px 18px; display: none; gap: 20px; font-size: 20px; }
+#hud .board table { border-collapse: collapse; min-width: 300px; }
+#hud .board th { text-align: left; font-weight: normal; opacity: .6; padding: 2px 10px; }
+#hud .board td { padding: 2px 10px; font-variant-numeric: tabular-nums; }
+#hud .board tr.me td { background: rgba(242,211,107,.18); }
+#hud .board h3 { margin: 0 0 6px; font-weight: normal; font-size: 26px; }
+#hud .end { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
+  background: rgba(5,3,4,.82); pointer-events: auto; gap: 12px; }
+#hud .end .t { font-size: 84px; letter-spacing: 6px; line-height: .9; }
+#hud .end .win { color: #f2d36b; } #hud .end .lose { color: #ff5a3a; }
+#hud .end button { font-family: inherit; font-size: 32px; letter-spacing: 4px; padding: 4px 34px; cursor: pointer;
+  background: #f2d36b; color: #1a1210; border: none; box-shadow: 5px 5px 0 #6b1a10; }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }
 @keyframes blink { 50% { opacity: .4 } }
@@ -64,6 +85,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent: 
 export interface MapMarker {
   x: number;
   z: number;
+  color: string;
 }
 
 export class Hud {
@@ -87,6 +109,11 @@ export class Hud {
   private dead: HTMLDivElement;
   private map: HTMLCanvasElement;
   private mapCtx: CanvasRenderingContext2D;
+  private match: HTMLDivElement;
+  private tagLayer: HTMLDivElement;
+  private tagEls: HTMLDivElement[] = [];
+  private board: HTMLDivElement;
+  private end: HTMLDivElement;
   private hitT = 0;
   private bannerT = 0;
   private dmgArcs: { e: HTMLElement; t: number; angle: number }[] = [];
@@ -116,6 +143,10 @@ export class Hud {
     this.banner = el('div', 'banner', this.root);
     this.streak = el('div', 'streak', this.root);
     this.dead = el('div', 'dead', this.root, '<div class="t">K.I.A.</div><div class="s"></div>');
+    this.tagLayer = el('div', 'tags', this.root);
+    this.match = el('div', 'match', this.root);
+    this.board = el('div', 'board', this.root);
+    this.end = el('div', 'end', this.root);
     this.map = el('canvas', 'map', this.root);
     this.map.width = 168;
     this.map.height = 168;
@@ -194,6 +225,39 @@ export class Hud {
     if (show) (this.dead.querySelector('.s') as HTMLElement).textContent = text;
   }
 
+  matchBar(html: string) {
+    if (this.match.innerHTML !== html) this.match.innerHTML = html;
+  }
+
+  /** Name tags in screen pixels. */
+  tags(list: { x: number; y: number; text: string; friendly: boolean }[]) {
+    while (this.tagEls.length < list.length) this.tagEls.push(el('div', '', this.tagLayer));
+    this.tagEls.forEach((e, i) => {
+      const t = list[i];
+      if (!t) {
+        e.style.display = 'none';
+        return;
+      }
+      e.style.display = '';
+      e.className = t.friendly ? 'f' : 'e';
+      e.textContent = t.text;
+      e.style.left = `${t.x}px`;
+      e.style.top = `${t.y}px`;
+    });
+  }
+
+  scoreboardTable(show: boolean, html = '') {
+    this.board.style.display = show ? 'flex' : 'none';
+    if (show && this.board.innerHTML !== html) this.board.innerHTML = html;
+  }
+
+  endScreen(html: string | null, onContinue?: () => void) {
+    this.end.style.display = html ? 'flex' : 'none';
+    if (!html) return;
+    this.end.innerHTML = html + '<button type="button">CONTINUE</button>';
+    this.end.querySelector('button')!.addEventListener('click', () => onContinue?.());
+  }
+
   update(dt: number, health: number, attackerAngle: (a: number) => number) {
     this.hitT -= dt;
     this.hit.style.opacity = this.hitT > 0 ? '1' : '0';
@@ -231,7 +295,7 @@ export class Hud {
     c.lineWidth = 0.6;
     c.strokeRect(-half, -half, half * 2, half * 2);
     for (const e of enemies) {
-      c.fillStyle = '#ff3b2a';
+      c.fillStyle = e.color;
       c.beginPath();
       c.arc(e.x, e.z, 1.1, 0, Math.PI * 2);
       c.fill();

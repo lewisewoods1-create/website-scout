@@ -40,6 +40,8 @@ export function createMaterials() {
     brass: new THREE.MeshStandardMaterial({ color: 0xc9a14a, metalness: 1, roughness: 0.25 }),
     copper: new THREE.MeshStandardMaterial({ color: 0xb06a3a, metalness: 1, roughness: 0.3 }),
     glass: new THREE.MeshStandardMaterial({ color: 0x9fc4e0, metalness: 0, roughness: 0.05, transparent: true, opacity: 0.07, depthWrite: false }),
+    wood: new THREE.MeshStandardMaterial({ map: T.woodTex(), roughness: 0.45, metalness: 0, roughnessMap: scratchesLight }),
+    bakelite: new THREE.MeshStandardMaterial({ color: 0x5a2418, roughness: 0.35, metalness: 0.05, roughnessMap: scratchesLight }),
     lens: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d6, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.1 }),
     // soldier
     camo: fabric(camo),
@@ -60,3 +62,39 @@ export function createMaterials() {
 }
 
 export type Materials = ReturnType<typeof createMaterials>;
+
+export const rimUniforms = {
+  rimColor: { value: new THREE.Color(0xffd9b0) },
+  rimStrength: { value: 0.55 },
+};
+
+/**
+ * Fresnel rim light so full-detail soldiers pop off the dithered low-res world.
+ * Applied to soldier-only materials (gun materials are shared with the viewmodel).
+ */
+export function addRim(mat: THREE.MeshStandardMaterial) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.rimColor = rimUniforms.rimColor;
+    shader.uniforms.rimStrength = rimUniforms.rimStrength;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 rimColor;\nuniform float rimStrength;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        float rimF = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
+        totalEmissiveRadiance += rimColor * pow(rimF, 2.5) * rimStrength;`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'rim';
+}
+
+/** Character-only copies of materials the viewmodel also uses, with rim light. */
+export function soldierMaterials(m: Materials): Materials {
+  const c = { ...m };
+  for (const k of ['camo', 'camoAlt', 'coyote', 'ranger', 'webbing', 'skin', 'glove', 'gloveKnuckle', 'boot', 'helmet', 'polymer', 'rubber'] as const) {
+    const mat = m[k].clone();
+    addRim(mat);
+    c[k] = mat;
+  }
+  return c;
+}

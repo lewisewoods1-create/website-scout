@@ -27,15 +27,13 @@ export function levelForXp(xp: number) {
 
 /** Placeholder unlock track — just enough to show the loop working. */
 export const UNLOCKS: Record<number, string> = {
-  2: 'KR-4: FOREGRIP CAMO "DUST"',
-  3: 'CALLING CARD: "FIRST BLOOD"',
-  4: 'CREATE-A-CLASS',
-  5: 'PERK: QUICKDRAW',
-  6: 'SMG: VX-9',
-  8: 'KILLSTREAK: PRECISION STRIKE',
-  10: 'LMG: RHINO 249',
-  12: 'SNIPER: LONGSTRIDE .408',
-  15: 'SUPPLY CRATE TIER II',
+  2: 'HOLOGRAPHIC SIGHT · DESERT DIGITAL CAMO',
+  3: 'FOREGRIP · PERK: QUICK HANDS',
+  4: 'SUPPRESSOR · WOODLAND CAMO',
+  5: 'PERK: THICK SKIN',
+  6: 'URBAN CAMO',
+  9: 'CRIMSON TIGER CAMO',
+  15: 'GOLD CAMO',
 };
 
 export interface Profile {

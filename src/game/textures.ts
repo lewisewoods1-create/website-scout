@@ -469,3 +469,105 @@ export function flashTex() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+// ---------------------------------------------------------------- weapon finishes
+
+/** Varnished walnut with long grain, for the VK-47 furniture. */
+export function woodTex(seed = 71) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(256, 512);
+  ctx.fillStyle = '#5a2e17';
+  ctx.fillRect(0, 0, 256, 512);
+  for (let i = 0; i < 140; i++) {
+    const x = rnd() * 256;
+    const w = 1 + rnd() * 3;
+    ctx.fillStyle = rnd() > 0.5 ? `rgba(30,12,4,${0.15 + rnd() * 0.3})` : `rgba(150,80,40,${0.1 + rnd() * 0.2})`;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    for (let y = 0; y <= 512; y += 32) ctx.lineTo(x + Math.sin(y * 0.02 + i) * (2 + rnd() * 4), y);
+    ctx.lineTo(x + w, 512);
+    ctx.lineTo(x + w, 0);
+    ctx.fill();
+  }
+  noise(ctx, 256, 512, rnd, 0.06, 1);
+  // a few knots
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = 'rgba(25,10,3,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(rnd() * 256, rnd() * 512, 3 + rnd() * 4, 8 + rnd() * 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return hires(c);
+}
+
+export type CamoId = 'none' | 'desert' | 'woodland' | 'urban' | 'crimson' | 'gold';
+
+/** Weapon camo maps (painted finishes, not fabric). */
+export function weaponCamoTex(id: CamoId) {
+  const rnd = mulberry32(id.length * 977 + id.charCodeAt(0));
+  const [c, ctx] = canvas(512, 512);
+  const pal: Record<string, string[]> = {
+    desert: ['#b49a6b', '#8f7650', '#cdb58a', '#6e5a3c'],
+    woodland: ['#5d6b3a', '#3a3f24', '#7a6a45', '#20221a'],
+    urban: ['#8c9094', '#5c6064', '#b8bcc0', '#2f3236'],
+    crimson: ['#7a1a14', '#1a0d0c', '#a8301f', '#3b0f0b'],
+    gold: ['#c9a24a', '#e4c46a', '#a17d2c', '#f2dc8a'],
+  };
+  const p = pal[id] ?? pal.desert;
+  ctx.fillStyle = p[0];
+  ctx.fillRect(0, 0, 512, 512);
+  if (id === 'desert' || id === 'urban') {
+    // digital pixel blocks
+    for (let layer = 1; layer < p.length; layer++) {
+      ctx.fillStyle = p[layer];
+      for (let i = 0; i < 260 - layer * 50; i++) {
+        const x = Math.floor(rnd() * 64) * 8;
+        const y = Math.floor(rnd() * 64) * 8;
+        const w = (1 + Math.floor(rnd() * 4)) * 8;
+        const h = (1 + Math.floor(rnd() * 3)) * 8;
+        ctx.fillRect(x, y, w, h);
+      }
+    }
+  } else if (id === 'crimson') {
+    // tiger stripes
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = p[1 + (i % 3)];
+      const y = rnd() * 512;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= 512; x += 32) ctx.lineTo(x, y + Math.sin(x * 0.03 + i) * 14 + (rnd() - 0.5) * 10);
+      for (let x = 512; x >= 0; x -= 32) ctx.lineTo(x, y + 6 + rnd() * 8 + Math.sin(x * 0.03 + i) * 14);
+      ctx.fill();
+    }
+  } else if (id === 'gold') {
+    const g = ctx.createLinearGradient(0, 0, 512, 512);
+    p.forEach((col, i) => g.addColorStop(i / (p.length - 1), col));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 512, 512);
+  } else {
+    for (let layer = 1; layer < p.length; layer++) {
+      ctx.fillStyle = p[layer];
+      for (let i = 0; i < 30; i++) {
+        ctx.beginPath();
+        ctx.ellipse(rnd() * 512, rnd() * 512, 20 + rnd() * 50, 10 + rnd() * 25, rnd() * 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  noise(ctx, 512, 512, rnd, 0.06, 1);
+  return hires(c);
+}
+
+/** Small reflex sight: single bright dot. */
+export function dotReticleTex() {
+  const [c, ctx] = canvas(128, 128);
+  ctx.shadowColor = '#ff2a1a';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#ff6a50';
+  ctx.beginPath();
+  ctx.arc(64, 64, 11, 0, Math.PI * 2);
+  ctx.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

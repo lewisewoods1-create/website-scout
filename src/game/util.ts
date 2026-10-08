@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** Deterministic PRNG so procedural textures look the same every load. */
 export function mulberry32(seed: number): () => number {
@@ -95,4 +96,50 @@ export function solveTwoBone(
 
 export function setLayerDeep(obj: THREE.Object3D, layer: number) {
   obj.traverse((o) => o.layers.set(layer));
+}
+
+/**
+ * Merge every static mesh under each animated node into one mesh per material.
+ * Keeps the named pivots (and any other groups) so animation still works, but
+ * cuts a ~300-part soldier down to a few dozen draw calls.
+ */
+export function bakeStatic(root: THREE.Object3D, pivots: string[]) {
+  root.updateMatrixWorld(true);
+  const anchors = new Set<THREE.Object3D>([root]);
+  for (const n of pivots) {
+    const o = root.getObjectByName(n);
+    if (o) anchors.add(o);
+  }
+  const buckets = new Map<THREE.Object3D, Map<THREE.Material, THREE.BufferGeometry[]>>();
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    const m = o as THREE.Mesh;
+    if (Array.isArray(m.material)) return;
+    let a: THREE.Object3D | null = m.parent;
+    while (a && !anchors.has(a)) a = a.parent;
+    if (!a) return;
+    const rel = new THREE.Matrix4().copy(a.matrixWorld).invert().multiply(m.matrixWorld);
+    let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    g.applyMatrix4(rel);
+    for (const key of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(key)) g.deleteAttribute(key);
+    if (!g.attributes.uv) {
+      g = g.clone();
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    }
+    g.clearGroups();
+    const byMat = buckets.get(a) ?? new Map<THREE.Material, THREE.BufferGeometry[]>();
+    const list = byMat.get(m.material) ?? [];
+    list.push(g);
+    byMat.set(m.material, list);
+    buckets.set(a, byMat);
+    meshes.push(m);
+  });
+  for (const m of meshes) m.parent?.remove(m);
+  for (const [anchor, byMat] of buckets) {
+    for (const [mat, list] of byMat) {
+      const merged = mergeGeometries(list, false);
+      if (merged) anchor.add(new THREE.Mesh(merged, mat));
+    }
+  }
 }

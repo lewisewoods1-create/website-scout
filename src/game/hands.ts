@@ -66,26 +66,22 @@ export function buildHand(m: Materials, side: 1 | -1, pose: HandPose): THREE.Gro
 const basis = new THREE.Matrix4();
 
 /**
- * Put both hands on a rifle (in rifle space). Returns wrist anchors so arms can
- * be attached by the viewmodel or the third-person IK.
+ * Put both hands on a weapon using its gripAnchor / guardAnchor nodes.
+ * Returns the hand groups so arms can be attached (viewmodel sleeves or third-person IK).
  */
-export function attachHands(rifle: THREE.Object3D, m: Materials) {
+export function attachHands(weapon: THREE.Object3D, m: Materials) {
   // right: wraps the pistol grip, trigger finger indexed straight
   const right = buildHand(m, 1, { curl: [0.35, 1.25, 1.3, 1.25], thumbCurl: 0.5 });
-  const gripPivot = new THREE.Group();
-  gripPivot.position.set(0, -0.04, 0.077);
-  gripPivot.rotation.x = -0.32;
-  rifle.add(gripPivot);
   right.position.set(0.024, -0.045, 0.07);
   right.rotation.set(0, 0.08, 0);
-  gripPivot.add(right);
+  weapon.getObjectByName('gripAnchor')!.add(right);
 
   // left: palm under the handguard, fingers wrapping up the right side
   const left = buildHand(m, -1, { curl: [1.0, 1.05, 1.1, 1.1], thumbCurl: 0.3 });
   basis.makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0));
   left.quaternion.setFromRotationMatrix(basis);
-  left.position.set(-0.065, -0.026, -0.2);
-  rifle.add(left);
+  left.position.copy(weapon.getObjectByName('guardAnchor')!.position);
+  weapon.add(left);
 
   return { right, left };
 }

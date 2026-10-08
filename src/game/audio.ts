@@ -67,17 +67,49 @@ export class Sfx {
   }
 
   /** distance in metres (0 = player's own gun), pan -1..1 */
-  gunshot(distance = 0, pan = 0) {
+  gunshot(distance = 0, pan = 0, weapon: 'kr4' | 'vk47' = 'kr4', suppressed = false) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const near = distance < 1;
+    const ak = weapon === 'vk47';
+    if (suppressed) {
+      const out = this.out(near ? 0.45 : Math.min(0.3, 4 / (distance + 4)), pan);
+      this.burst(out, t, 0.06, 'bandpass', 900, 1.2, 1);
+      this.tone(out, t, 0.06, 220, 90, 'sine', 0.5);
+      if (near) this.tone(out, t + 0.02, 0.03, 3200, 2400, 'square', 0.05);
+      return;
+    }
     const att = near ? 1 : Math.min(1, 9 / (distance + 4));
     const out = this.out(att * (near ? 0.9 : 0.85), pan);
-    const lp = near ? 9000 : Math.max(900, 6000 - distance * 90);
-    this.burst(out, t, near ? 0.09 : 0.07, 'lowpass', lp, 0.5, 1.2);
-    this.burst(out, t, 0.45, 'bandpass', near ? 1400 : 700, 0.6, 0.25); // reverb-ish tail
-    this.tone(out, t, 0.13, near ? 140 : 100, 40, 'sine', near ? 1.1 : 0.6);
-    if (near) this.tone(out, t + 0.03, 0.03, 3200, 2400, 'square', 0.04); // mechanical clack
+    const lp = near ? (ak ? 6500 : 9000) : Math.max(900, 6000 - distance * 90);
+    this.burst(out, t, near ? (ak ? 0.12 : 0.09) : 0.07, 'lowpass', lp, 0.5, 1.2);
+    this.burst(out, t, ak ? 0.6 : 0.45, 'bandpass', near ? (ak ? 900 : 1400) : 700, 0.6, 0.25);
+    this.tone(out, t, ak ? 0.18 : 0.13, near ? (ak ? 110 : 140) : 100, 38, 'sine', near ? 1.2 : 0.6);
+    if (near) this.tone(out, t + 0.03, 0.03, ak ? 2400 : 3200, 1900, 'square', 0.04);
+  }
+
+  /** Menu boot: rising chord + shimmer. */
+  boot() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(0.35, 0);
+    [130.8, 196, 261.6, 329.6, 392, 523.2].forEach((f, i) => {
+      this.tone(out, t + i * 0.06, 2.2 - i * 0.15, f, f * 1.002, i % 2 ? 'triangle' : 'sine', 0.3);
+    });
+    this.burst(out, t + 0.4, 1.4, 'highpass', 6000, 0.5, 0.15);
+  }
+
+  uiMove() {
+    if (!this.ctx) return;
+    this.tone(this.out(0.15, 0), this.ctx.currentTime, 0.04, 880, 880, 'square', 0.3);
+  }
+
+  uiSelect() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(0.2, 0);
+    this.tone(out, t, 0.06, 660, 660, 'square', 0.3);
+    this.tone(out, t + 0.06, 0.1, 990, 990, 'square', 0.3);
   }
 
   hitmarker(kill = false) {

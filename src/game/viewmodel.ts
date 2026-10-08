@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { Materials } from './materials';
-import { buildRifle } from './rifle';
+import { buildWeapon, type WeaponCfg } from './weapons';
 import { attachHands } from './hands';
 import { flashTex } from './textures';
+import type { GunStats } from './loadout';
 import { clamp, damp, lerp, mesh, orientLimb, smooth } from './util';
 
 export interface ViewmodelInput {
@@ -23,16 +24,19 @@ export class Viewmodel {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(52, 1, 0.01, 10);
   private root = new THREE.Group();
-  private rifle: THREE.Group;
-  private mag: THREE.Object3D;
-  private magHome: THREE.Vector3;
-  private charging: THREE.Object3D;
-  private muzzle: THREE.Object3D;
-  private port: THREE.Object3D;
-  private adsPos: THREE.Vector3;
-  private handL: THREE.Object3D;
-  private handLHome: THREE.Vector3;
-  private sleeveL: THREE.Mesh;
+  private mats: Materials;
+  private rifle!: THREE.Group;
+  private mag!: THREE.Object3D;
+  private magHome!: THREE.Vector3;
+  private charging!: THREE.Object3D;
+  private chargingHome!: THREE.Vector3;
+  private muzzle!: THREE.Object3D;
+  private port!: THREE.Object3D;
+  private adsPos!: THREE.Vector3;
+  private handL!: THREE.Object3D;
+  private handLHome!: THREE.Vector3;
+  private sleeveL!: THREE.Mesh;
+  private recoilMul = 1;
   private elbowL = new THREE.Vector3(-0.26, -0.32, 0.12);
   private flash = new THREE.Group();
   private flashLight = new THREE.PointLight(0xffa040, 0, 2.5, 2);
@@ -71,7 +75,42 @@ export class Viewmodel {
     rim.position.set(0.5, 0.6, -1.5);
     this.scene.add(key, fill, rim, new THREE.AmbientLight(0x403040, 0.6));
 
-    this.rifle = buildRifle(m);
+    // muzzle flash: three crossed additive cards
+    const fm = new THREE.MeshBasicMaterial({
+      map: flashTex(),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), fm);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.22), fm);
+    side.rotation.set(Math.PI / 2, 0, 0);
+    side.position.z = -0.08;
+    const side2 = side.clone();
+    side2.rotation.set(Math.PI / 2, Math.PI / 2, 0);
+    this.flash.add(front, side, side2);
+    this.flash.visible = false;
+    this.flashLight.position.z = -0.05;
+    this.mats = m;
+    this.equip({ weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'none', camo: 'none' }, 0.24, 1);
+
+    const shellGeo = new THREE.CylinderGeometry(0.0048, 0.0048, 0.045, 10);
+    for (let i = 0; i < 14; i++) {
+      const s = new THREE.Mesh(shellGeo, m.brass);
+      s.visible = false;
+      this.camera.add(s);
+      this.shells.push({ m: s, v: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0 });
+    }
+  }
+
+  /** Swap in a new weapon build (create-a-class). */
+  equip(cfg: WeaponCfg, eyeDist: number, recoil: number) {
+    const m = this.mats;
+    if (this.rifle) this.root.remove(this.rifle);
+    this.recoilMul = recoil;
+    this.rifle = buildWeapon(m, cfg, true);
     this.root.add(this.rifle);
     const hands = attachHands(this.rifle, m);
     this.handL = hands.left;
@@ -92,40 +131,15 @@ export class Viewmodel {
     this.mag = this.rifle.getObjectByName('mag')!;
     this.magHome = this.mag.position.clone();
     this.charging = this.rifle.getObjectByName('chargingHandle')!;
+    this.chargingHome = this.charging.position.clone();
     this.muzzle = this.rifle.getObjectByName('muzzle')!;
     this.port = this.rifle.getObjectByName('ejectionPort')!;
     const sight = this.rifle.getObjectByName('sight')!;
     const sp = sight.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-    this.adsPos = new THREE.Vector3(-sp.x, -sp.y, -0.24 - sp.z);
-
-    // muzzle flash: three crossed additive cards
-    const fm = new THREE.MeshBasicMaterial({
-      map: flashTex(),
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      toneMapped: false,
-    });
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), fm);
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.22), fm);
-    side.rotation.set(Math.PI / 2, 0, 0);
-    side.position.z = -0.08;
-    const side2 = side.clone();
-    side2.rotation.set(Math.PI / 2, Math.PI / 2, 0);
-    this.flash.add(front, side, side2);
-    this.flash.visible = false;
+    this.adsPos = new THREE.Vector3(-sp.x, -sp.y, -eyeDist - sp.z);
     this.muzzle.add(this.flash);
     this.muzzle.add(this.flashLight);
-    this.flashLight.position.z = -0.05;
-
-    const shellGeo = new THREE.CylinderGeometry(0.0048, 0.0048, 0.045, 10);
-    for (let i = 0; i < 14; i++) {
-      const s = new THREE.Mesh(shellGeo, m.brass);
-      s.visible = false;
-      this.camera.add(s);
-      this.shells.push({ m: s, v: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0 });
-    }
+    this.reload = -1;
   }
 
   setAspect(a: number) {
@@ -134,7 +148,7 @@ export class Viewmodel {
   }
 
   fire() {
-    const adsK = lerp(1, 0.35, this.ads);
+    const adsK = lerp(1, 0.35, this.ads) * this.recoilMul;
     this.kick += 0.028 * adsK;
     this.kickPitch += (0.045 + Math.random() * 0.02) * adsK;
     this.kickYaw += (Math.random() - 0.5) * 0.03 * adsK;
@@ -220,7 +234,7 @@ export class Viewmodel {
     const t = this.reload;
     this.mag.position.copy(this.magHome);
     this.mag.visible = true;
-    this.charging.position.z = 0;
+    this.charging.position.copy(this.chargingHome);
     this.handL.position.copy(this.handLHome);
     this.rifle.rotation.set(0, 0, 0);
     this.rifle.position.set(0, 0, 0);
@@ -248,7 +262,7 @@ export class Viewmodel {
 
       if (this.reloadEmpty && t > 0.76 && t < 0.92) {
         const k = (t - 0.76) / 0.16;
-        this.charging.position.z = (k < 0.5 ? smooth(k * 2) : 1 - smooth((k - 0.5) * 2)) * 0.07;
+        this.charging.position.z = this.chargingHome.z + (k < 0.5 ? smooth(k * 2) : 1 - smooth((k - 0.5) * 2)) * 0.07;
       }
     }
     orientLimb(this.sleeveL, this.handL.position.clone().add(new THREE.Vector3(-0.03, 0, 0)), this.elbowL);
@@ -259,28 +273,47 @@ export class Viewmodel {
   }
 }
 
-/** Weapon stats + fire control. */
+/** Fire control for the equipped loadout. */
 export class Gun {
-  readonly name = 'KR-4 CARBINE';
-  readonly magSize = 30;
-  ammo = 30;
-  reserve = 150;
-  readonly rpm = 780;
-  readonly reloadTime = 2.1;
-  readonly reloadEmptyTime = 2.6;
+  stats: GunStats;
+  ammo: number;
+  reserve: number;
   private cool = 0;
   reloading = -1;
   private reloadDur = 0;
   emptyReload = false;
 
+  constructor(stats: GunStats) {
+    this.stats = stats;
+    this.ammo = stats.mag;
+    this.reserve = stats.reserve;
+  }
+
+  get name() {
+    return this.stats.name;
+  }
+
+  get magSize() {
+    return this.stats.mag;
+  }
+
+  /** Re-arm with new stats (spawn / class change). */
+  reset(stats: GunStats) {
+    this.stats = stats;
+    this.ammo = stats.mag;
+    this.reserve = stats.reserve;
+    this.reloading = -1;
+    this.cool = 0;
+  }
+
   damageAt(dist: number) {
-    return dist < 25 ? 34 : dist > 50 ? 22 : lerp(34, 22, (dist - 25) / 25);
+    return this.stats.damageAt(dist);
   }
 
   startReload(): boolean {
     if (this.reloading >= 0 || this.ammo >= this.magSize || this.reserve <= 0) return false;
     this.emptyReload = this.ammo === 0;
-    this.reloadDur = this.emptyReload ? this.reloadEmptyTime : this.reloadTime;
+    this.reloadDur = this.emptyReload ? this.stats.reloadEmpty : this.stats.reload;
     this.reloading = 0;
     return true;
   }
@@ -291,8 +324,7 @@ export class Gun {
     if (this.reloading >= 0) {
       this.reloading += dt / this.reloadDur;
       if (this.reloading >= 1) {
-        const need = this.magSize - this.ammo;
-        const take = Math.min(need, this.reserve);
+        const take = Math.min(this.magSize - this.ammo, this.reserve);
         this.ammo += take;
         this.reserve -= take;
         this.reloading = -1;
@@ -302,7 +334,7 @@ export class Gun {
     let shots = 0;
     if (trigger && canFire) {
       while (this.cool <= 0 && this.ammo > 0) {
-        this.cool += 60 / this.rpm;
+        this.cool += 60 / this.stats.rpm;
         this.ammo--;
         shots++;
       }
