@@ -7,9 +7,10 @@ import {
 } from './loadout';
 import { buildWeapon, cfgFromLoadout } from './weapons';
 import { buildSoldier } from './soldier';
-import { MAX_LEVEL, MAX_PRESTIGE, rankName, xpForLevel } from './progression';
+import { MAX_LEVEL, MAX_PRESTIGE, xpForLevel } from './progression';
+import { ART_MAX_LEVEL, badgeImg, prestigeName, rankInfo } from './badges';
 import { nextUnlock, unlockTrack } from './unlocks';
-import { BANNERS, GEAR, HEADGEAR, UNIFORMS, badge, bannerUnlocked, playerCard } from './cosmetics';
+import { BANNERS, GEAR, HEADGEAR, UNIFORMS, bannerUnlocked, playerCard } from './cosmetics';
 import { MAPS } from './maps';
 
 type Tab = 'mp' | 'bots' | 'cac' | 'soldier' | 'barracks' | 'settings' | 'resume' | 'quit';
@@ -85,16 +86,16 @@ export class Menu {
     const ready = this.ctx.game.prestigeReady;
     this.root.innerHTML = `
       <div class="left">
+        <div class="rank top">
+          ${playerCard(this.ctx.game.profileData)}
+          <div class="rk-xp">${p.level >= MAX_LEVEL ? (ready ? '<span style="color:var(--gold)">PRESTIGE AVAILABLE · BARRACKS</span>' : 'MAX LEVEL') : `${(p.xp - base).toLocaleString()} / ${need.toLocaleString()} XP TO LEVEL ${p.level + 1}`}</div>
+        </div>
         <h1 class="title glitch">${title}</h1>
         <div class="tag">${pause ? 'PAUSED' : 'PS1 WORLD · MODERN KIT'}</div>
         <nav>${items
           .map(([id, label, small], i) => `<button type="button" data-tab="${id}" class="${this.tab === id ? 'on' : ''}" style="animation-delay:${animateNav ? 0.35 + i * 0.07 : 0}s">${label}${small ? `<small>${small}</small>` : ''}</button>`)
           .join('')}</nav>
-        <div class="rank">
-          ${playerCard(this.ctx.game.profileData)}
-          <div class="rk-xp">${p.level >= MAX_LEVEL ? (ready ? '<span style="color:var(--gold)">PRESTIGE AVAILABLE · BARRACKS</span>' : 'MAX LEVEL') : `${(p.xp - base).toLocaleString()} / ${need.toLocaleString()} XP TO LEVEL ${p.level + 1}`}</div>
-          ${nu ? `<div class="rk-next">NEXT UNLOCK · LVL ${nu[0]}<br><b>${nu[1]}</b></div>` : ''}
-        </div>
+        ${nu ? `<div class="rk-next bottom">NEXT UNLOCK · LVL ${nu[0]}<br><b>${nu[1]}</b></div>` : ''}
       </div>
       <div class="panel" id="panel">${this.panelHtml()}</div>`;
     this.root.querySelectorAll<HTMLButtonElement>('nav button').forEach((b) => {
@@ -181,7 +182,8 @@ export class Menu {
   private slotRow(key: string, label: string, opts: Choice[], current: string, kills: number, weaponName: string, attr = 'set', note = '') {
     const cur = opts.find((o) => o.id === current) ?? opts[0];
     const open = this.openSlot === key;
-    const sw = cur.swatch ? `<i class="sw" style="background:${cur.swatch}"></i>` : '';
+    // always reserve the swatch column so every row's value lines up
+    const sw = `<i class="sw ${cur.swatch ? '' : 'none'}" style="background:${cur.swatch ?? 'transparent'}"></i>`;
     const choices = open
       ? `<div class="choices">${note ? `<div class="sub" style="grid-column:1/-1">${note}</div>` : ''}${opts
           .map((o) => {
@@ -258,13 +260,17 @@ export class Menu {
     const track = [...unlockTrack().entries()]
       .map(([l, items]) => `<div class="playlist"><span>LVL ${l} · ${items.join(' · ')}</span><span class="chip ${p.level >= l ? 'ok' : ''}">${p.level >= l ? 'UNLOCKED' : 'LOCKED'}</span></div>`)
       .join('');
-    const emblems = Array.from({ length: MAX_PRESTIGE }, (_, i) => `<div class="emb ${p.prestige >= i + 1 ? 'got' : ''}">${badge(MAX_LEVEL, i + 1, 48)}<span>P${i + 1}</span></div>`).join('');
+    const emblems = Array.from({ length: MAX_PRESTIGE }, (_, i) => `<div class="emb ${p.prestige >= i + 1 ? 'got' : ''}">${badgeImg(MAX_LEVEL, i + 1, 64)}<span>P${i + 1} · ${prestigeName(i + 1).toUpperCase()}</span></div>`).join('');
+    const ladder = Array.from({ length: ART_MAX_LEVEL / 3 }, (_, i) => {
+      const lvl = i * 3 + 1;
+      return `<div class="emb ${p.level >= lvl || p.prestige > 0 ? 'got' : ''}">${badgeImg(lvl + 2, 0, 56)}<span>${lvl}–${lvl + 2} · ${rankInfo(lvl).abbr}</span></div>`;
+    }).join('');
     const wk = Object.entries(WEAPONS)
       .map(([id, w]) => `<div class="card"><b>${p.weaponKills[id] ?? 0}</b><span>${w.name}</span></div>`)
       .join('');
     return `<h2>BARRACKS</h2>
-      <div class="rankhead">${badge(p.level, p.prestige, 72)}<div><div class="rk-big">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LEVEL ${p.level}</div>
-        <div class="sub" style="margin:0">${rankName(p.level)} · ${p.xp.toLocaleString()} XP this prestige</div></div></div>
+      <div class="rankhead">${badgeImg(p.level, p.prestige, 96)}<div><div class="rk-big">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LEVEL ${p.level}</div>
+        <div class="sub" style="margin:0">${rankInfo(p.level).name.toUpperCase()}${p.prestige ? ` · ${prestigeName(p.prestige).toUpperCase()}` : ''} · ${p.xp.toLocaleString()} XP this prestige</div></div></div>
       <div class="prestige-box">
         ${ready
           ? `<b>PRESTIGE ${p.prestige + 1} IS AVAILABLE</b><span>Resets you to level 1 and re-locks level unlocks. You keep your stats, weapon kills and a new prestige emblem and banner.</span>
@@ -272,6 +278,7 @@ export class Menu {
           : `<b>${p.prestige >= MAX_PRESTIGE ? 'MAX PRESTIGE' : `PRESTIGE ${p.prestige + 1} AT LEVEL ${MAX_LEVEL}`}</b><span>Reach level ${MAX_LEVEL} to reset with a new emblem. ${MAX_PRESTIGE} prestiges in total.</span>`}
       </div>
       <div class="label">PRESTIGE EMBLEMS</div><div class="emblems">${emblems}</div>
+      <div class="label">RANK LADDER · 25 RANKS × 3 TIERS${MAX_LEVEL > ART_MAX_LEVEL ? ` · LEVELS ${ART_MAX_LEVEL + 1}–${MAX_LEVEL} KEEP COMMANDER III` : ''}</div><div class="emblems">${ladder}</div>
       <div class="label">COMBAT RECORD</div>
       <div class="grid2">
         <div class="card"><b>${p.kills}</b><span>KILLS</span></div><div class="card"><b>${p.deaths}</b><span>DEATHS</span></div>

@@ -17,6 +17,8 @@ import { cfgFromLoadout, type WeaponCfg } from './weapons';
 import { computeStats, loadClasses, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type WeaponId } from './loadout';
 import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
 import { nextUnlock, unlockTrack } from './unlocks';
+import { badgeImg } from './badges';
+import { playerCard } from './cosmetics';
 import { clamp, damp, lerp } from './util';
 
 export interface Settings {
@@ -65,6 +67,8 @@ class PlayerAgent implements Combatant {
   readonly isPlayer = true;
   kills = 0;
   deaths = 0;
+  level = 1;
+  prestige = 0;
   private p: Player;
   constructor(p: Player) {
     this.p = p;
@@ -140,6 +144,18 @@ export class Game {
   private orbit = 0;
   /** true while the class picker is up at match start */
   choosingClass = false;
+  /** pre-match sequence: class pick -> camera zoom -> 6s countdown -> live */
+  private pregame: 'off' | 'choose' | 'zoom' | 'countdown' = 'off';
+  private pregameT = 0;
+  private lastCount = 0;
+  private zoomFrom = new THREE.Vector3();
+  private zoomQuat = new THREE.Quaternion();
+  private zoomFov = 60;
+  /** TDM start sides: axis and which end team 0 starts at */
+  private sideAxis: 'x' | 'z' = 'x';
+  private sideSign = 1;
+  private boardKey = '';
+  private boardCache = '';
   /** main.ts locks the pointer once a class is picked */
   onClassChosen: () => void = () => {};
   paused = false;
@@ -335,6 +351,8 @@ export class Game {
     this.throwables.clear();
     this.phase = 'attract';
     this.choosingClass = false;
+    this.pregame = 'off';
+    this.hud.countdown(null);
     this.hud.classPicker(null);
     this.player.alive = false;
     this.hud.setVisible(false);
@@ -383,11 +401,22 @@ export class Game {
       b.team = cfg.mode === 'tdm' ? (ally ? 0 : 1) : 100 + i;
       const variant = cfg.mode === 'tdm' ? (ally ? 0 : 1) : i % 2;
       b.dress(this.templates[variant * 2 + (Math.random() < 0.5 ? 0 : 1)]);
+      // flavour ranks for the scoreboard
+      b.prestige = Math.random() < 0.25 ? 1 + Math.floor(Math.random() * 4) : 0;
+      b.level = 1 + Math.floor(Math.random() * MAX_LEVEL);
       this.world.combatants.push(b);
     });
-    for (const b of this.bots) b.spawn(this.pickSpawn(b));
+    // each match picks fresh start sides so the opening fight moves around the map
+    this.sideAxis = Math.random() < 0.5 ? 'x' : 'z';
+    this.sideSign = Math.random() < 0.5 ? 1 : -1;
+    for (const b of this.bots) {
+      const p = this.startSpawn(b);
+      b.spawn(p, Math.atan2(-p.x, -p.z));
+    }
     this.player.alive = false;
     this.choosingClass = true;
+    this.pregame = 'choose';
+    this.hud.countdown(null);
     this.refreshHud();
     this.hud.setVisible(true);
     this.hud.classPicker(this.classCards(), (i) => this.chooseClass(i), 'CHOOSE CLASS', `${MODES[cfg.mode].label} · ${mapById(cfg.mapId).name} · ${DIFFICULTIES[cfg.difficulty].label} BOTS`);
@@ -409,10 +438,51 @@ export class Game {
     this.classIdx = i;
     this.pendingClass = -1;
     this.hud.classPicker(null);
-    this.respawnPlayer();
-    this.hud.showBanner(MODES[this.cfg.mode].label, `${mapById(this.cfg.mapId).name} · ${this.classes[i].name}`, 3);
+    this.applyClass(i);
+    const p = this.startSpawn(this.agent);
+    this.player.spawn(p, Math.atan2(p.x, p.z));
+    this.vm.reload = -1;
+    // fly the overview camera down into the player's eyes
+    this.pregame = 'zoom';
+    this.pregameT = 0;
+    this.zoomFrom.copy(this.camera.position);
+    this.zoomQuat.copy(this.camera.quaternion);
+    this.zoomFov = this.camera.fov;
     this.sfx.uiSelect();
     this.onClassChosen();
+  }
+
+  /** Opening positions: TDM teams start at opposite ends, FFA spreads everyone out. */
+  private startSpawn(c: Combatant): THREE.Vector3 {
+    const half = this.map.half;
+    const others = this.world.combatants.filter((o) => o !== c && o.alive);
+    let best = this.map.nav.randomWalkable();
+    let bestGap = -1;
+    for (let tries = 0; tries < 40; tries++) {
+      let x: number;
+      let z: number;
+      if (this.cfg.mode === 'tdm') {
+        const side = (c.team === this.agent.team ? 1 : -1) * this.sideSign;
+        const along = side * half * (0.55 + Math.random() * 0.33);
+        const across = (Math.random() * 2 - 1) * half * 0.75;
+        [x, z] = this.sideAxis === 'x' ? [along, across] : [across, along];
+      } else {
+        x = (Math.random() * 2 - 1) * half * 0.85;
+        z = (Math.random() * 2 - 1) * half * 0.85;
+      }
+      const cell = this.map.nav.nearestWalkable(x, z);
+      if (!cell) continue;
+      const p = this.map.nav.center(cell[0], cell[1]);
+      let gap = 99;
+      for (const o of others) gap = Math.min(gap, Math.hypot(o.pos.x - p.x, o.pos.z - p.z));
+      const want = this.cfg.mode === 'tdm' ? 2.5 : 10;
+      if (gap >= want) return p;
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = p;
+      }
+    }
+    return best;
   }
 
   /** Swap class: applied immediately if dead/at spawn, otherwise next life. */
@@ -462,7 +532,7 @@ export class Game {
     this.addXp(bonus, before);
     const kd = this.agent.deaths ? (this.agent.kills / this.agent.deaths).toFixed(2) : String(this.agent.kills);
     this.hud.endScreen(
-      `<div class="t ${cls}">${title}</div>
+      `${playerCard(this.profile)}<div class="t ${cls}">${title}</div>
        <div style="font-size:26px">${MODES[this.cfg.mode].label}${this.cfg.mode === 'tdm' ? ` · ${this.teamScore[0]} – ${this.teamScore[1]}` : ''}</div>
        <div style="font-size:24px">KILLS ${this.agent.kills} · DEATHS ${this.agent.deaths} · K/D ${kd}</div>
        <div style="font-size:30px;color:#f2d36b">+${this.matchXp} XP <span style="font-size:20px;opacity:.75">(MATCH BONUS +${bonus})</span></div>`,
@@ -483,12 +553,16 @@ export class Game {
     return this.phase === 'match' && this.cfg.mode === 'tdm' && b.team === this.agent.team;
   }
 
+  /**
+   * Mid-match respawn: score candidate points by distance from enemies,
+   * sight lines, crowding and (TDM) closeness to teammates, then pick at
+   * random from the best few so spawns don't become predictable.
+   */
   private pickSpawn(c: Combatant): THREE.Vector3 {
     const cands = [...this.map.spawns];
-    for (let i = 0; i < 14; i++) cands.push(this.map.nav.randomWalkable());
+    for (let i = 0; i < 24; i++) cands.push(this.map.nav.randomWalkable());
     const eyeTmp = new THREE.Vector3();
-    let best = cands[0];
-    let bestScore = -Infinity;
+    const scored: [THREE.Vector3, number][] = [];
     for (const p of cands) {
       let minHostile = 80;
       let minFriend = 80;
@@ -510,14 +584,13 @@ export class Game {
           minFriend = Math.min(minFriend, d);
         }
       }
-      let score = Math.min(minHostile, 40) - (seen ? 30 : 0) - (blocked ? 100 : 0) + Math.random() * 5;
-      if (this.cfg.mode === 'tdm' && this.phase === 'match') score -= minFriend * 0.25;
-      if (score > bestScore) {
-        bestScore = score;
-        best = p;
-      }
+      let score = Math.min(minHostile, 35) - (seen ? 30 : 0) - (blocked ? 100 : 0) - (minHostile < 12 ? 25 : 0) + Math.random() * 6;
+      if (this.cfg.mode === 'tdm' && this.phase === 'match') score -= Math.max(0, minFriend - 6) * 0.35;
+      scored.push([p, score]);
     }
-    return best.clone();
+    scored.sort((a, b) => b[1] - a[1]);
+    const top = scored.slice(0, 4);
+    return top[Math.floor(Math.random() * top.length)][0].clone();
   }
 
   private respawnPlayer() {
@@ -785,6 +858,8 @@ export class Game {
 
   private refreshHud() {
     const lvl = levelForXp(this.profile.xp);
+    this.agent.level = lvl;
+    this.agent.prestige = this.profile.prestige;
     const base = xpForLevel(lvl);
     const need = lvl >= MAX_LEVEL ? 1 : xpForLevel(lvl + 1) - base;
     const nu = nextUnlock(lvl);
@@ -802,9 +877,17 @@ export class Game {
   }
 
   private boardHtml() {
+    const key = `${this.teamScore}|${this.world.combatants.map((c) => `${c.id}:${c.kills}:${c.deaths}`).join(',')}`;
+    if (key === this.boardKey) return this.boardCache;
+    this.boardKey = key;
     const row = (c: Combatant) =>
-      `<tr class="${c.isPlayer ? 'me' : ''}"><td>${c.name}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.kills * 100}</td></tr>`;
-    const head = '<tr><th>PLAYER</th><th>K</th><th>D</th><th>SCORE</th></tr>';
+      `<tr class="${c.isPlayer ? 'me' : ''}"><td class="bd">${badgeImg(c.level, c.prestige, 30)}</td><td class="lv">${c.prestige ? `P${c.prestige}` : ''} ${c.level}</td><td>${c.isPlayer ? this.profile.callsign : c.name}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.kills * 100}</td></tr>`;
+    const head = '<tr><th></th><th>LVL</th><th>PLAYER</th><th>K</th><th>D</th><th>SCORE</th></tr>';
+    this.boardCache = this.boardBody(row, head);
+    return this.boardCache;
+  }
+
+  private boardBody(row: (c: Combatant) => string, head: string) {
     const all = this.sortedBoard();
     if (this.cfg.mode === 'tdm') {
       const a = all.filter((c) => c.team === this.agent.team);
@@ -844,7 +927,8 @@ export class Game {
 
     this.world.listener.copy(cam.position);
     this.world.listenerYaw = cam.rotation.y;
-    for (const b of this.bots) b.update(dt, this.world);
+    const frozen = this.phase === 'match' && this.pregame !== 'off';
+    if (!frozen) for (const b of this.bots) b.update(dt, this.world);
     this.throwables.update(dt, this.map.boxes, (k, pos, owner) => this.detonate(k, pos, owner));
     this.effects.update(dt);
 
@@ -854,6 +938,30 @@ export class Game {
     this.sun.position.copy(focus).addScaledVector(this.sunDir, 50);
     this.sun.target.updateMatrixWorld();
     this.input.endFrame();
+  }
+
+  /** Camera swoops from the overview into the player's eyes, then the countdown starts. */
+  private updateZoom(dt: number) {
+    this.pregameT = Math.min(1, this.pregameT + dt / 1.6);
+    const e = this.pregameT < 0.5 ? 4 * this.pregameT ** 3 : 1 - (-2 * this.pregameT + 2) ** 3 / 2;
+    const p = this.player;
+    const cam = this.camera;
+    const eye = p.eye(new THREE.Vector3());
+    cam.position.lerpVectors(this.zoomFrom, eye, e);
+    cam.position.y += Math.sin(e * Math.PI) * 3;
+    const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(p.pitch, p.yaw, 0, 'YXZ'));
+    cam.quaternion.slerpQuaternions(this.zoomQuat, target, e);
+    cam.rotation.setFromQuaternion(cam.quaternion, 'YXZ');
+    cam.fov = this.zoomFov + (this.settings.fov - this.zoomFov) * e;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+    this.vm.scene.visible = false;
+    if (this.pregameT >= 1) {
+      this.pregame = 'countdown';
+      this.pregameT = 6;
+      this.lastCount = 0;
+      this.vm.scene.visible = true;
+    }
   }
 
   private updateAttract(dt: number) {
@@ -872,15 +980,34 @@ export class Game {
 
   private updateMatch(dt: number) {
     if (this.choosingClass) {
-      // overview while the player picks a class; bots already fighting
+      // overview while the player picks a class; everyone waits at their start side
       this.updateAttract(dt);
-      this.timeLeft -= dt;
+      return;
+    }
+    if (this.pregame === 'zoom') {
+      this.updateZoom(dt);
       return;
     }
     const p = this.player;
     const inp = this.input;
     const s = this.settings;
-    const live = this.phase === 'match';
+    const counting = this.pregame === 'countdown';
+    if (counting) {
+      this.pregameT -= dt;
+      const n = Math.ceil(this.pregameT);
+      if (n !== this.lastCount && n > 0) {
+        this.lastCount = n;
+        this.hud.countdown(String(n));
+        this.sfx.click(n <= 3 ? 1400 : 900, 0.35);
+      }
+      if (this.pregameT <= 0) {
+        this.pregame = 'off';
+        this.hud.countdown('GO');
+        this.sfx.streak();
+        setTimeout(() => this.hud.countdown(null), 900);
+      }
+    }
+    const live = this.phase === 'match' && !counting;
 
     if (live) {
       this.timeLeft -= dt;
@@ -898,7 +1025,7 @@ export class Game {
     }
 
     const aiming = inp.aim && p.alive;
-    if (p.alive) p.update(dt, inp, this.map.boxes, aiming, this.now);
+    if (p.alive && !counting) p.update(dt, inp, this.map.boxes, aiming, this.now);
     if (p.landedSpeed > 0) {
       this.landDip = clamp(p.landedSpeed / 10, 0, 1);
       this.vm.landed(this.landDip);
@@ -988,6 +1115,10 @@ export class Game {
     });
     this.vm.scene.visible = p.alive;
 
+    if (counting) {
+      this.hud.ammo(this.gun.name, this.gun.ammo, this.gun.reserve, this.gun.magSize, false);
+      this.hud.matchBar(this.matchHtml());
+    }
     if (!live) return;
 
     if (!p.alive) {

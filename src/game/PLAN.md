@@ -95,8 +95,10 @@ A small companion that **floats just under the gun** in first person and reacts 
 
 - Levels 1–85, then Prestige 1–10 (manual, from Barracks; resets to level 1, keeps stats and weapon kills).
 - XP per level grows linearly: 800 XP for level 2, +140 per level after (about 555k XP to reach 85).
-- Rank insignia and prestige emblems are procedural placeholders. To use uploaded artwork, add image URLs
-  (or data URIs) to `EMBLEM_IMAGES` in `cosmetics.ts` with keys `prestige-1`…`prestige-10` and `rank-0`…`rank-16`.
+- Badges come from the Dead Pixels badge pack. Its generator (`vendor/badges.js`) renders every badge as
+  vector SVG at runtime (output is byte-identical to the pack's SVG files), and animates prestige 4-10 live.
+  The pack defines 75 levels (25 ranks x 3 tiers); levels 76-85 currently reuse the Commander III badge.
+  Either add 10 more badges to the generator or set `MAX_LEVEL` to 75 in `progression.ts`.
 - Banners (calling cards) unlock by level and prestige; the Soldier tab picks the active one.
 
 ## 6. Suggested order

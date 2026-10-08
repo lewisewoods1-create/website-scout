@@ -18,6 +18,9 @@ export interface Combatant {
   pos: THREE.Vector3;
   kills: number;
   deaths: number;
+  /** rank shown on the scoreboard */
+  level: number;
+  prestige: number;
   eye(out: THREE.Vector3): THREE.Vector3;
   speed(): number;
   crouch(): number;
@@ -77,6 +80,8 @@ export class Bot implements Combatant {
   readonly isPlayer = false;
   kills = 0;
   deaths = 0;
+  level = 1;
+  prestige = 0;
   active = false;
   weapon: WeaponId = 'kr4';
 
@@ -185,9 +190,9 @@ export class Bot implements Combatant {
     return 0;
   }
 
-  spawn(p: THREE.Vector3) {
+  spawn(p: THREE.Vector3, yaw = Math.random() * Math.PI * 2) {
     this.pos.copy(p);
-    this.yaw = Math.random() * Math.PI * 2;
+    this.yaw = yaw;
     this.health = 100;
     this.alive = true;
     this.state = 'patrol';

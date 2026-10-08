@@ -90,6 +90,14 @@ const CSS = `
 #hud .nade { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
 #hud .nade i { position: absolute; left: -16px; top: -120px; width: 32px; height: 32px; border-radius: 50%; background: rgba(200,30,20,.85);
   color: #fff; font-style: normal; font-size: 16px; line-height: 32px; text-align: center; transform-origin: 16px 120px; }
+#hud .count { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); font-size: 150px; font-weight: 800; color: #f2d36b;
+  text-shadow: 0 6px 30px rgba(0,0,0,.7); display: none; }
+#hud .count.on { display: block; animation: countPop .9s ease-out; }
+#hud .count small { display: block; font-size: 20px; letter-spacing: 6px; text-align: center; color: #ece6d4; font-weight: 700; }
+@keyframes countPop { 0% { transform: translate(-50%, -50%) scale(1.6) } 22% { transform: translate(-50%, -50%) scale(1) } 100% { transform: translate(-50%, -50%) scale(.92) } }
+#hud .board td.bd { padding: 1px 4px; width: 30px; }
+#hud .board td.lv { opacity: .7; font-size: 15px; white-space: nowrap; }
+#hud .end .pcard { width: min(440px, 90vw); margin-bottom: 8px; }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }
 @keyframes blink { 50% { opacity: .4 } }
@@ -136,6 +144,7 @@ export class Hud {
   private board: HTMLDivElement;
   private end: HTMLDivElement;
   private picker: HTMLDivElement;
+  private countEl: HTMLDivElement;
   private equipEl: HTMLDivElement;
   private white: HTMLDivElement;
   private nadeEl: HTMLDivElement;
@@ -178,6 +187,7 @@ export class Hud {
     this.nadeEl = el('div', 'nade', this.root);
     this.white = el('div', 'whiteout', this.root);
     this.picker = el('div', 'picker', this.root);
+    this.countEl = el('div', 'count', this.root);
     el('div', 'hint', this.root, 'TAB · SCOREBOARD');
     this.map = el('canvas', 'map', this.root);
     this.map.width = 168;
@@ -288,6 +298,18 @@ export class Hud {
       e.style.display = i < angles.length ? '' : 'none';
       if (i < angles.length) e.style.transform = `rotate(${angles[i]}rad)`;
     });
+  }
+
+  /** Big pre-match countdown; null hides it. */
+  countdown(text: string | null) {
+    if (!text) {
+      this.countEl.className = 'count';
+      return;
+    }
+    this.countEl.innerHTML = text === 'GO' ? 'GO!' : `${text}<small>MATCH STARTING</small>`;
+    this.countEl.className = 'count';
+    void this.countEl.offsetWidth; // restart the pop animation
+    this.countEl.className = 'count on';
   }
 
   matchBar(html: string) {

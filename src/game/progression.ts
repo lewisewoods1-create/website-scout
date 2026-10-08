@@ -32,29 +32,6 @@ export function levelForXp(xp: number) {
   return l;
 }
 
-/** Rank titles, each covering a band of levels. */
-const RANKS: [number, string][] = [
-  [1, 'PRIVATE'], [4, 'PRIVATE FIRST CLASS'], [8, 'SPECIALIST'], [13, 'CORPORAL'], [18, 'SERGEANT'],
-  [24, 'STAFF SERGEANT'], [30, 'SERGEANT FIRST CLASS'], [36, 'MASTER SERGEANT'], [42, 'FIRST SERGEANT'],
-  [48, 'SERGEANT MAJOR'], [54, 'SECOND LIEUTENANT'], [60, 'FIRST LIEUTENANT'], [66, 'CAPTAIN'], [72, 'MAJOR'],
-  [78, 'LIEUTENANT COLONEL'], [83, 'COLONEL'], [85, 'COMMANDER'],
-];
-
-export function rankName(level: number) {
-  let name = RANKS[0][1];
-  for (const [l, n] of RANKS) if (level >= l) name = n;
-  return name;
-}
-
-/** 0-based rank band, used to pick an insignia. */
-export function rankTier(level: number) {
-  let t = 0;
-  RANKS.forEach(([l], i) => {
-    if (level >= l) t = i;
-  });
-  return t;
-}
-
 export interface SoldierLook {
   uniform: string;
   gear: string;

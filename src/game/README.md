@@ -28,7 +28,7 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | `bot.ts` | AI states patrol → engage → hunt; reaction time, strafing, burst fire, accuracy model |
 | `player.ts` | Movement: sprint, crouch, slide, jump, step-up, health regen |
 | `progression.ts`, `unlocks.ts` | Levels 1–85 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
-| `cosmetics.ts` | Banners, rank insignia, prestige emblems (uploadable), soldier looks, player card |
+| `cosmetics.ts`, `badges.ts` | Banners, soldier looks, player card; rank/prestige badges from the badge pack generator in `vendor/` |
 | `throwables.ts` | Frag, smoke and stun grenades: bounce physics, fuses, smoke that blocks vision |
 | `hud.ts`, `audio.ts`, `effects.ts`, `textures.ts`, `materials.ts` | HUD, synthesised SFX, low-res FX, procedural textures, PBR materials |
 

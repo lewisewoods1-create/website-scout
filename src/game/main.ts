@@ -1,6 +1,7 @@
 import { Game, type MatchConfig, type Settings } from './game';
 import { Menu } from './menu';
 import { loadClasses } from './loadout';
+import { startBadgeAnimation } from './badges';
 
 const SETTINGS_KEY = 'deadpixel.settings.v1';
 const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 480, volume: 0.7, unlockAll: false };
@@ -26,6 +27,7 @@ const settings = loadSettings();
 const classes = loadClasses();
 const t0 = performance.now();
 const game = new Game(canvas, settings);
+startBadgeAnimation();
 const tGame = performance.now() - t0;
 const debug = new URLSearchParams(location.search).has('debug');
 game.input.forceActive = debug;
