@@ -1464,14 +1464,26 @@ export class Game {
     }
     if (this.deploy === 'sentry') {
       const ahead = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
-      const pos = p.pos.clone().addScaledVector(ahead, 2.2).setY(0);
-      // needs clear ground: no wall or crate in its footprint, and a line from your eyes
-      const r = 0.55;
-      const blocked = this.map.boxes.some((b) => pos.x + r > b.min.x && pos.x - r < b.max.x && pos.z + r > b.min.z && pos.z - r < b.max.z && b.min.y < 1.2 && b.max.y > 0.05);
       const eye = p.eye(new THREE.Vector3());
-      const to = pos.clone().setY(0.8).sub(eye);
-      const len = to.length();
-      const valid = !blocked && !raycastBoxes(this.map.boxes, eye, to.divideScalar(len), len) && Math.abs(pos.x) < this.map.half - 1 && Math.abs(pos.z) < this.map.half - 1;
+      // needs clear ground (no wall or crate in its footprint) and a line from your eyes;
+      // tries closer spots if the one in front of you is blocked
+      const r = 0.55;
+      const ok = (q: THREE.Vector3) => {
+        const blocked = this.map.boxes.some((b) => q.x + r > b.min.x && q.x - r < b.max.x && q.z + r > b.min.z && q.z - r < b.max.z && b.min.y < 1.2 && b.max.y > 0.05);
+        const to = q.clone().setY(0.8).sub(eye);
+        const len = to.length();
+        return !blocked && !raycastBoxes(this.map.boxes, eye, to.divideScalar(len), len) && Math.abs(q.x) < this.map.half - 1 && Math.abs(q.z) < this.map.half - 1;
+      };
+      let pos = p.pos.clone().addScaledVector(ahead, 2.2).setY(0);
+      let valid = false;
+      for (const d of [2.2, 1.8, 1.4]) {
+        const q = p.pos.clone().addScaledVector(ahead, d).setY(0);
+        if (ok(q)) {
+          pos = q;
+          valid = true;
+          break;
+        }
+      }
       this.streakRt.moveGhost(pos, p.yaw, valid);
       if (confirm && valid) {
         this.streakRt.placeSentry(pos, p.yaw);
