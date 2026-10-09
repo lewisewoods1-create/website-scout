@@ -173,6 +173,7 @@ export class Game {
   private crashCount = 6;
   /** hands-on killstreak in progress */
   private deploy: 'sentry' | 'airstrike' | null = null;
+  private deployT = 0;
   private strikeAt = new THREE.Vector3();
   private strikeAngle = 0;
   private crateHold = 0;
@@ -1428,6 +1429,7 @@ export class Game {
   private startDeploy(kind: 'sentry' | 'airstrike') {
     this.gun.cancelReload();
     this.deploy = kind;
+    this.deployT = this.now;
     this.vm.hidden = true;
     if (kind === 'sentry') this.streakRt.showGhost(true);
     else {
@@ -1453,8 +1455,10 @@ export class Game {
   private updateDeploy(dt: number) {
     const inp = this.input;
     const p = this.player;
-    const confirm = inp.pressed.has('KeyF') || (inp.fire && !this.wasFiring);
-    if (inp.pressed.has('Digit4')) {
+    // the [4] press that called the streak in mustn't also cancel it
+    const fresh = this.now - this.deployT < 0.05;
+    const confirm = !fresh && (inp.pressed.has('KeyF') || (inp.fire && !this.wasFiring));
+    if (!fresh && inp.pressed.has('Digit4')) {
       this.endDeploy(true);
       return;
     }

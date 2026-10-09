@@ -239,7 +239,11 @@ export class StreakRuntime {
           c.obj.position.y = 0;
           c.landed = true;
           if (chute) chute.visible = false;
-          h.effects.explosion(c.obj.position.clone().setY(0.1));
+          // dust kicked up around the crate as it lands
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            h.effects.impact(c.obj.position.clone().add(new THREE.Vector3(Math.cos(a) * 0.7, 0.05, Math.sin(a) * 0.7)), new THREE.Vector3(0, 1, 0), 'dirt');
+          }
           const { dist, pan } = h.pan(c.obj.position);
           h.sfx.thud(dist, pan);
         }
