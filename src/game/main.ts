@@ -103,7 +103,7 @@ window.addEventListener(
   (e) => {
     // keep Tab for the scoreboard instead of moving focus out of the game
     if (e.code === 'Tab' && game.phase === 'match') e.preventDefault();
-    if (game.choosingClass && /^Digit[1-3]$/.test(e.code)) game.chooseClass(Number(e.code.slice(5)) - 1);
+    if (game.choosingClass && /^Digit[1-5]$/.test(e.code)) game.chooseClass(Number(e.code.slice(5)) - 1);
   },
   { capture: true },
 );

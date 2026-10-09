@@ -1,5 +1,6 @@
 import { hasGold, hasMastery, WEAPONS, type WeaponId, type WeaponClassId } from './loadout';
 import { MAPS } from './maps';
+import { asset } from './assets';
 import type { Profile } from './progression';
 
 /**
@@ -8,8 +9,7 @@ import type { Profile } from './progression';
  * Where the pack's suggested unlock needs something the game doesn't have (water, prone,
  * shotguns, dog tags...), the challenge is swapped for a measurable one that fits the title.
  *
- * Artwork lives in public/game/cards/<theme>_<tier>.png (512x128). The single-file build
- * inlines the 256x64 set via globalThis.__DP_CARDS.
+ * Artwork lives in public/game/cards/<theme>_<tier>.png (512x128); see assets.ts.
  */
 
 export interface Theme {
@@ -217,8 +217,7 @@ export const CHALLENGES: Challenge[] = THEMES.flatMap((t) =>
 
 /** Card artwork URL: inlined data in the single-file build, else the served PNG. */
 export function cardArt(id: string) {
-  const inline = (globalThis as unknown as { __DP_CARDS?: Record<string, string> }).__DP_CARDS;
-  return inline?.[id] ?? `cards/${id}.png`;
+  return asset(`cards/${id}.png`);
 }
 
 /** Stats derived from the profile rather than counted. */

@@ -108,6 +108,11 @@ export function startBadgeAnimation() {
         if (!img.offsetParent) return; // hidden
         img.src = frameUri(Number(img.dataset.anim), frame);
       });
+      // animated prestige banners: 6x6 sprite sheets on the same 36-frame clock
+      const pos = `${(frame % 6) * 20}% ${Math.floor(frame / 6) * 20}%`;
+      document.querySelectorAll<HTMLElement>('[data-psheet]').forEach((el) => {
+        if (el.offsetParent) el.style.backgroundPosition = pos;
+      });
     }
     requestAnimationFrame(tick);
   };

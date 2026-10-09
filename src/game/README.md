@@ -30,6 +30,7 @@ Append `?debug` to skip pointer lock and expose `window.game` for automation.
 | `progression.ts`, `unlocks.ts` | Levels 1–75 + Prestige 1–10, XP curve, rank names, local profile, unlock track |
 | `challenges.ts` | 100 challenges, one per calling card (20 themes x 5 tiers) over profile stat counters |
 | `killstreaks.ts` | Killstreak roster and runtime: supply drop, mortar, sentry, airstrike, drone, System Crash |
+| `camos.ts`, `assets.ts` | Camo overlay pack on a tri-planar shader (animated Prism / Dead Signal); art paths for public/game/ (inlined in single-file builds) |
 | `cosmetics.ts`, `badges.ts` | Banners, soldier looks, player card; rank/prestige badges from the badge pack generator in `vendor/` |
 | `throwables.ts` | Frag, smoke and stun grenades: bounce physics, fuses, smoke that blocks vision |
 | `audio.ts` | Synthesised SFX plus a sequenced score: menu synthwave loop, in-match tension bed, countdown and promotion stings |

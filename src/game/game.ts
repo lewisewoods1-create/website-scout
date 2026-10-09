@@ -14,7 +14,7 @@ import { Hud, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
-import { CAMOS, classOf, computeStats, hasGold, hasMastery, isUnlocked, type HitZone, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type PrimaryId, type WeaponId } from './loadout';
+import { CAMOS, cacUnlocked, classSlots, premadeClasses, classOf, computeStats, hasDeadSignal, hasGold, hasMastery, isUnlocked, type HitZone, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type PrimaryId, type WeaponId } from './loadout';
 import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
 import { nextUnlock, unlockTrack } from './unlocks';
 import { badgeImg, badgeThumb, rankInfo, thumbVersion } from './badges';
@@ -170,6 +170,13 @@ export class Game {
   private earned: StreakId[] = [];
   private streakRt!: StreakRuntime;
   private crashT = -1;
+  private crashCount = 6;
+  /** hands-on killstreak in progress */
+  private deploy: 'sentry' | 'airstrike' | null = null;
+  private strikeAt = new THREE.Vector3();
+  private strikeAngle = 0;
+  private crateHold = 0;
+  private cratePrompt = false;
   private sweepT = 0;
   private now = 0;
   private respawnT = 0;
@@ -257,6 +264,7 @@ export class Game {
       sfx: this.sfx,
       now: () => this.now,
       playerFeet: () => this.player.pos.clone(),
+      playerEye: () => this.player.eye(new THREE.Vector3()),
       playerYaw: () => this.player.yaw,
       playerAlive: () => this.player.alive,
       enemies: () => this.bots.filter((b) => b.active && b.alive && this.hostile(this.agent, b)),
@@ -272,7 +280,10 @@ export class Game {
         if (bot.damage(damage, this.agent, this.now)) this.registerKill(this.agent, bot, false, STREAKS[label].name, `streak_${label}`);
       },
       pan: (pos) => ({ dist: pos.distanceTo(this.camera.position), pan: panFor(pos, this.camera.position, this.camera.rotation.y) }),
-      resupply: () => this.resupply(),
+      suppress: (bot) => {
+        bot.suppressedUntil = this.now + 1.4;
+      },
+      plume: (pos, color, life) => this.throwables.plume(pos, color, life),
     });
 
     const sm = soldierMaterials(mats);
@@ -425,6 +436,7 @@ export class Game {
   startAttract() {
     this.throwables.clear();
     this.streakRt.clear();
+    this.endDeploy(false);
     this.hud.clearOverlays();
     this.sfx.music('menu');
     this.phase = 'attract';
@@ -454,8 +466,8 @@ export class Game {
     this.throwables.clear();
     this.loadMap(cfg.mapId);
     this.cfg = cfg;
-    this.classes = classes;
-    this.classIdx = cfg.classIndex;
+    this.classes = this.playable(classes);
+    this.classIdx = Math.min(cfg.classIndex, this.classes.length - 1);
     this.pendingClass = -1;
     this.phase = 'match';
     this.teamScore = [0, 0];
@@ -470,6 +482,7 @@ export class Game {
     this.multi = 0;
     this.lastKillT = -99;
     this.earned = [];
+    this.endDeploy(false);
     this.crashT = -1;
     this.streakRt.clear();
     this.sweepT = 0;
@@ -580,9 +593,18 @@ export class Game {
     return best;
   }
 
+  /** Classes you can pick right now: premade ones before Create a Class, then 3 or 5 custom slots. */
+  private playable(custom: Loadout[]) {
+    const lvl = levelForXp(this.profile.xp);
+    const all = this.settings.unlockAll;
+    if (!cacUnlocked(lvl, all)) return premadeClasses();
+    return custom.slice(0, classSlots(lvl, all));
+  }
+
   /** Swap class: applied immediately if dead/at spawn, otherwise next life. */
   setClass(idx: number, classes: Loadout[]) {
-    this.classes = classes;
+    this.classes = this.playable(classes);
+    idx = Math.min(idx, this.classes.length - 1);
     if (!this.player.alive) this.classIdx = idx;
     else this.pendingClass = idx;
   }
@@ -826,50 +848,44 @@ export class Game {
     }
   }
 
-  /** Supply drop pickup: full ammo on both guns, an extra frag and tactical, maybe a bonus streak. */
-  private resupply() {
-    for (const g of this.guns) {
-      g.ammo = g.magSize;
-      g.reserve = g.stats.reserve;
-    }
-    this.frags = Math.min(this.frags + 1, 3);
-    this.tacs = Math.min(this.tacs + 1, 3);
-    bump(this.profile, 'packages');
-    this.sfx.streak();
-    const bonus = Math.random() < 0.25 ? (['sweep', 'mortar', 'sentry'] as StreakId[])[Math.floor(Math.random() * 3)] : null;
-    if (bonus) {
-      this.earned.push(bonus);
-      this.hud.streakEarned(STREAKS[bonus].name, streakIcon(bonus, 72), 'BONUS FROM SUPPLY DROP');
-      this.sfx.streakReady();
-    } else this.hud.showBanner('RESUPPLIED', 'FULL AMMO · +1 FRAG · +1 TACTICAL', 2.5);
-  }
-
-  /** System Crash: glitch the screen, then every enemy drops and the match ends. */
+  /** System Crash: the screen gets hacked, a 5-second countdown, then an electric wave ends it. */
   private systemCrash() {
     this.crashT = 0;
+    this.crashCount = 6;
     this.sfx.systemCrash();
-    this.hud.glitch(true);
+    this.hud.crash('hack');
     bump(this.profile, 'crash_used');
   }
 
   private updateCrash(dt: number) {
     const before = this.crashT;
     this.crashT += dt;
-    if (before < 1.8 && this.crashT >= 1.8 && this.phase === 'match') {
+    const n = Math.max(0, 5 - Math.floor(this.crashT));
+    if (this.crashT < 5 && n !== this.crashCount) {
+      this.crashCount = n;
+      this.hud.crash('count', n);
+      this.sfx.countdownBeep(n);
+    }
+    if (before < 5 && this.crashT >= 5 && this.phase === 'match') {
+      // the wave: every enemy drops where they stand
+      this.hud.crash('wave');
+      this.sfx.electricWave();
+      this.punch += 0.08;
       for (const b of this.bots) {
         if (!b.active || !b.alive || !this.hostile(this.agent, b)) continue;
+        this.effects.stunFlash(b.spheres[1].c);
         b.damage(9999, this.agent, this.now);
         if (this.phase === 'match') this.registerKill(this.agent, b, false, 'SYSTEM CRASH', 'streak_crash');
       }
-      if (this.phase === 'match') {
-        if (this.cfg.mode === 'tdm') this.teamScore[0] = Math.max(this.teamScore[0], this.teamScore[1] + 1);
-        else this.agent.kills = Math.max(this.agent.kills, ...this.world.combatants.map((c) => c.kills + (c.isPlayer ? 0 : 1)));
-        this.endMatch();
-      }
     }
-    if (this.crashT > 3.2) {
+    if (before < 6.6 && this.crashT >= 6.6 && this.phase === 'match') {
+      if (this.cfg.mode === 'tdm') this.teamScore[0] = Math.max(this.teamScore[0], this.teamScore[1] + 1);
+      else this.agent.kills = Math.max(this.agent.kills, ...this.world.combatants.map((c) => c.kills + (c.isPlayer ? 0 : 1)));
+      this.endMatch();
+    }
+    if (this.crashT > 7.5) {
       this.crashT = -1;
-      this.hud.glitch(false);
+      this.hud.crash(null);
     }
   }
 
@@ -885,6 +901,14 @@ export class Game {
       return !raycastBoxes(this.map.boxes, from, dir.divideScalar(len), len);
     };
     const tmp = new THREE.Vector3();
+    if (kind === 'marker') {
+      this.streakRt.markerLanded(pos);
+      return;
+    }
+    if (kind === 'flare') {
+      this.streakRt.flareLanded(pos);
+      return;
+    }
     if (kind === 'smoke') {
       this.sfx.smokePop(dist, pan);
       return;
@@ -950,6 +974,8 @@ export class Game {
     if (p.health <= 0) {
       p.health = 0;
       p.alive = false;
+      // dying while carrying the sentry or holding the tablet keeps the streak
+      if (this.deploy) this.endDeploy(true);
       // killed mid-throw with the pin out: the grenade drops where you stood
       const cooked = this.vm.cancelThrow();
       if (cooked) this.throwables.throw(cooked, this.camera.position.clone().setY(p.pos.y + 1), new THREE.Vector3(0, 1, 0), this.agent);
@@ -1064,14 +1090,20 @@ export class Game {
     const heads = this.profile.weaponHeads;
     const cls = classOf(id);
     const masteredBefore = hasMastery(heads, cls);
+    const signalBefore = hasDeadSignal(heads);
     const n = (heads[id] ?? 0) + 1;
     heads[id] = n;
-    const camo = CAMOS.find((c) => c.heads === n);
-    if (camo) this.hud.showBanner(camo.id === 'gold' ? 'GOLD CAMO' : 'CAMO UNLOCKED', `${camo.name} FOR ${WEAPONS[id].name}`, 4);
+    for (const camo of CAMOS.filter((c) => c.heads === n)) {
+      this.hud.showBanner(camo.id === 'gold' ? 'GOLD CAMO' : 'CAMO UNLOCKED', `${camo.name} FOR ${WEAPONS[id].name}`, 4);
+    }
     if (!masteredBefore && hasMastery(heads, cls)) {
       const wc = WEAPON_CLASSES[cls];
       this.hud.showBanner('MASTERY CAMO', `${wc.camo.name} · ${wc.name}`, 5);
       this.sfx.levelUp();
+    }
+    if (!signalBefore && hasDeadSignal(heads)) {
+      this.hud.showBanner('DEAD SIGNAL', 'PRISM IN EVERY CLASS · UNLOCKED FOR ALL WEAPONS', 6);
+      this.sfx.rankUp();
     }
   }
 
@@ -1352,21 +1384,210 @@ export class Game {
 
   /** Call in the newest earned killstreak. */
   private useStreak() {
+    if (this.vm.busy || this.deploy) return;
     const id = this.earned.pop();
     if (!id) return;
     this.sfx.streakCall();
     bump(this.profile, 'streaks_used');
     const picks = [...this.profile.streaks].sort((a, b) => STREAKS[b].kills - STREAKS[a].kills);
     if (id === picks[0]) bump(this.profile, 'top_streak_used');
-    if (id === 'sweep') {
-      this.sweepT = SWEEP_TIME;
-      bump(this.profile, 'sweeps');
-      this.hud.showBanner('RADAR SWEEP', 'ENEMY POSITIONS REVEALED', 2.5);
-    } else if (id === 'crash') {
-      this.systemCrash();
-    } else {
-      this.streakRt.activate(id);
-      this.hud.showBanner(STREAKS[id].name, id === 'supply' ? 'CRATE INBOUND' : id === 'sentry' ? 'SENTRY DEPLOYED' : 'INBOUND', 2.5);
+    switch (id) {
+      case 'sweep':
+        this.sweepT = SWEEP_TIME;
+        bump(this.profile, 'sweeps');
+        this.hud.showBanner('RADAR SWEEP', 'ENEMY POSITIONS REVEALED', 2.5);
+        break;
+      case 'supply':
+        // throw the marker; the crate comes down on its smoke
+        this.gun.cancelReload();
+        this.vm.throwAnim('marker', () => this.sfx.pin(), () => {
+          if (this.phase === 'match' && this.player.alive) this.releaseThrow('marker');
+        });
+        break;
+      case 'mortar':
+        this.gun.cancelReload();
+        this.vm.throwAnim('flare', () => this.sfx.pin(), () => {
+          if (this.phase === 'match' && this.player.alive) this.releaseThrow('flare');
+        });
+        break;
+      case 'sentry':
+      case 'airstrike':
+        this.startDeploy(id);
+        break;
+      case 'drone':
+        this.streakRt.drone();
+        this.hud.showBanner('ATTACK DRONE', 'COVERING YOU', 2.5);
+        break;
+      case 'crash':
+        this.systemCrash();
+        break;
+    }
+  }
+
+  /** Hands-on streaks: carry the sentry, or aim the airstrike on the tablet. */
+  private startDeploy(kind: 'sentry' | 'airstrike') {
+    this.gun.cancelReload();
+    this.deploy = kind;
+    this.vm.hidden = true;
+    if (kind === 'sentry') this.streakRt.showGhost(true);
+    else {
+      // start the cursor on the enemy you'd most want to hit
+      const es = this.bots.filter((b) => b.active && b.alive && this.hostile(this.agent, b));
+      const c = es.length ? es.reduce((acc, b) => acc.add(b.pos), new THREE.Vector3()).divideScalar(es.length) : this.player.pos.clone();
+      this.strikeAt.set(c.x, 0, c.z);
+      this.strikeAngle = Math.random() * Math.PI;
+    }
+    this.hud.prompt(kind === 'sentry' ? 'PRESS [F] TO PLACE SENTRY · [4] CANCEL' : 'MOVE THE MOUSE TO AIM · WHEEL / R TO ROTATE · [F] CONFIRM · [4] CANCEL');
+  }
+
+  private endDeploy(refund: boolean) {
+    if (refund && this.deploy) this.earned.push(this.deploy);
+    this.deploy = null;
+    this.vm.hidden = false;
+    this.streakRt.showGhost(false);
+    this.hud.tablet(null);
+    this.hud.prompt(null);
+  }
+
+  /** Per-frame: sentry ghost placement or the airstrike tablet. */
+  private updateDeploy(dt: number) {
+    const inp = this.input;
+    const p = this.player;
+    const confirm = inp.pressed.has('KeyF') || (inp.fire && !this.wasFiring);
+    if (inp.pressed.has('Digit4')) {
+      this.endDeploy(true);
+      return;
+    }
+    if (this.deploy === 'sentry') {
+      const ahead = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
+      const pos = p.pos.clone().addScaledVector(ahead, 2.2).setY(0);
+      // needs clear ground: no wall or crate in its footprint, and a line from your eyes
+      const r = 0.55;
+      const blocked = this.map.boxes.some((b) => pos.x + r > b.min.x && pos.x - r < b.max.x && pos.z + r > b.min.z && pos.z - r < b.max.z && b.min.y < 1.2 && b.max.y > 0.05);
+      const eye = p.eye(new THREE.Vector3());
+      const to = pos.clone().setY(0.8).sub(eye);
+      const len = to.length();
+      const valid = !blocked && !raycastBoxes(this.map.boxes, eye, to.divideScalar(len), len) && Math.abs(pos.x) < this.map.half - 1 && Math.abs(pos.z) < this.map.half - 1;
+      this.streakRt.moveGhost(pos, p.yaw, valid);
+      if (confirm && valid) {
+        this.streakRt.placeSentry(pos, p.yaw);
+        this.hud.showBanner('SENTRY GUN', 'PLACED · GUARDING FOR 60s', 2.5);
+        this.endDeploy(false);
+      }
+    } else if (this.deploy === 'airstrike') {
+      const h = this.map.half;
+      this.strikeAt.x = clamp(this.strikeAt.x + inp.mouseDX * 0.06, -h, h);
+      this.strikeAt.z = clamp(this.strikeAt.z + inp.mouseDY * 0.06, -h, h);
+      this.strikeAngle += inp.wheel * 0.3 + (inp.down('KeyR') ? dt * 2.2 : 0);
+      this.hud.tablet((ctx, w) => this.drawTablet(ctx, w));
+      if (confirm) {
+        this.streakRt.airstrike(this.strikeAt.clone(), new THREE.Vector3(Math.cos(this.strikeAngle), 0, Math.sin(this.strikeAngle)));
+        this.hud.showBanner('AIRSTRIKE', 'JET INBOUND', 2.5);
+        this.endDeploy(false);
+      }
+    }
+  }
+
+  /** The airstrike tablet: top-down map, friendlies, spotted enemies, and the sweep line with marching arrows. */
+  private drawTablet(ctx: CanvasRenderingContext2D, W: number) {
+    const h = this.map.half;
+    const sc = W / (h * 2);
+    const X = (x: number) => (x + h) * sc;
+    const Z = (z: number) => (z + h) * sc;
+    ctx.fillStyle = '#0c1a14';
+    ctx.fillRect(0, 0, W, W);
+    ctx.strokeStyle = 'rgba(120,255,170,0.08)';
+    for (let i = 0; i <= W; i += W / 16) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, W);
+      ctx.moveTo(0, i);
+      ctx.lineTo(W, i);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(150,220,180,0.55)';
+    for (const b of this.map.boxes) {
+      if (b.max.y < 0.3) continue;
+      ctx.fillRect(X(b.min.x), Z(b.min.z), (b.max.x - b.min.x) * sc, (b.max.z - b.min.z) * sc);
+    }
+    const dot = (x: number, z: number, col: string, r: number) => {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(X(x), Z(z), r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    for (const b of this.bots) {
+      if (!b.active || !b.alive) continue;
+      if (this.isFriendly(b)) dot(b.pos.x, b.pos.z, ALLY, 4);
+      else if (this.sweepT > 0 || this.now - b.lastShotT < 3) dot(b.pos.x, b.pos.z, ENEMY, 4.5);
+    }
+    dot(this.player.pos.x, this.player.pos.z, '#ffffff', 5);
+    // sweep line + arrows marching along it
+    const dx = Math.cos(this.strikeAngle);
+    const dz = Math.sin(this.strikeAngle);
+    const half = 18;
+    const cx = this.strikeAt.x;
+    const cz = this.strikeAt.z;
+    ctx.strokeStyle = 'rgba(255,90,58,0.35)';
+    ctx.lineWidth = 6.5 * 2 * sc;
+    ctx.beginPath();
+    ctx.moveTo(X(cx - dx * half), Z(cz - dz * half));
+    ctx.lineTo(X(cx + dx * half), Z(cz + dz * half));
+    ctx.stroke();
+    ctx.fillStyle = '#ff5a3a';
+    const phase = (this.now * 0.6) % 1;
+    for (let i = 0; i < 6; i++) {
+      const t = ((i + phase) / 6) * 2 - 1;
+      const ax = X(cx + dx * half * t);
+      const az = Z(cz + dz * half * t);
+      ctx.save();
+      ctx.translate(ax, az);
+      ctx.rotate(this.strikeAngle);
+      ctx.beginPath();
+      ctx.moveTo(9, 0);
+      ctx.lineTo(-5, -6);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-5, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = '#ffd23a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(X(cx), Z(cz), 10, 0, Math.PI * 2);
+    ctx.moveTo(X(cx) - 16, Z(cz));
+    ctx.lineTo(X(cx) + 16, Z(cz));
+    ctx.moveTo(X(cx), Z(cz) - 16);
+    ctx.lineTo(X(cx), Z(cz) + 16);
+    ctx.stroke();
+  }
+
+  /** Walk up to a landed supply crate and hold F to claim its killstreak. */
+  private updateCrates(dt: number) {
+    const p = this.player;
+    const crate = p.alive && !this.deploy ? this.streakRt.crateNear(p.pos) : null;
+    if (!crate) {
+      if (this.crateHold > 0 || this.cratePrompt) this.hud.prompt(null);
+      this.crateHold = 0;
+      this.cratePrompt = false;
+      return;
+    }
+    this.cratePrompt = true;
+    this.crateHold = this.input.down('KeyF') ? this.crateHold + dt : 0;
+    this.hud.prompt('HOLD [F] TO OPEN SUPPLY DROP', this.crateHold / 1.0);
+    if (this.crateHold >= 1.0) {
+      this.crateHold = 0;
+      this.streakRt.claimCrate(crate);
+      bump(this.profile, 'packages');
+      // any killstreak except another drop or a System Crash, cheaper ones more likely
+      const pool: StreakId[] = ['sweep', 'sweep', 'mortar', 'mortar', 'sentry', 'sentry', 'airstrike', 'drone'];
+      const got = pool[Math.floor(Math.random() * pool.length)];
+      this.earned.push(got);
+      this.sfx.streakReady();
+      this.hud.streakEarned(STREAKS[got].name, streakIcon(got, 72), 'FROM SUPPLY DROP · PRESS [4]');
+      this.hud.prompt(null);
+      this.cratePrompt = false;
     }
   }
 
@@ -1524,7 +1745,7 @@ export class Game {
 
     const adsSens = lerp(1, 0.6, this.vm.ads);
     const k = 0.0022 * s.sensitivity * adsSens;
-    if (p.alive) {
+    if (p.alive && this.deploy !== 'airstrike') {
       p.yaw -= inp.mouseDX * k;
       p.pitch = clamp(p.pitch - inp.mouseDY * k, -1.45, 1.45);
     }
@@ -1578,7 +1799,10 @@ export class Game {
         this.tacs--;
         this.throwItem(this.classes[this.classIdx].tactical);
       }
-      const canFire = !p.sprinting && this.vm.reload < 0 && !this.vm.busy;
+      const deploying = !!this.deploy;
+      if (deploying) this.updateDeploy(dt);
+      this.updateCrates(dt);
+      const canFire = !p.sprinting && this.vm.reload < 0 && !this.vm.busy && !deploying;
       const shots = this.gun.update(dt, inp.fire, canFire, this.vm.busy);
       for (let i = 0; i < shots && this.phase === 'match'; i++) this.shoot();
       if (inp.fire && !this.wasFiring && this.gun.ammo === 0 && this.gun.reserve === 0) this.sfx.dryFire();
@@ -1620,7 +1844,7 @@ export class Game {
       cam.rotation.y += Math.sin(this.swayT * 0.9 + 1) * 0.006 * k;
     } else this.breath = Math.min(1, this.breath + dt / 6);
     this.hud.scope(scoped, this.breath);
-    this.vm.hidden = scoped;
+    this.vm.hidden = scoped || !!this.deploy;
     const targetFov = lerp(s.fov, s.fov * this.gun.stats.adsFov, this.vm.ads) + (p.sprinting ? 4 : 0);
     if (Math.abs(cam.fov - targetFov) > 0.01) {
       cam.fov = damp(cam.fov, targetFov, 14, dt);
@@ -1647,7 +1871,7 @@ export class Game {
 
     if (!p.alive) {
       this.respawnT -= dt;
-      for (let i = 0; i < 3; i++) if (inp.pressed.has(`Digit${i + 1}`)) this.pendingClass = i;
+      for (let i = 0; i < this.classes.length; i++) if (inp.pressed.has(`Digit${i + 1}`)) this.pendingClass = i;
       const next = this.pendingClass >= 0 ? this.pendingClass : this.classIdx;
       const cls = this.classes.map((c, i) => (i === next ? `<b>[${i + 1}] ${c.name}</b>` : `[${i + 1}] ${c.name}`)).join(' &nbsp; ');
       this.hud.deadScreen(true, `Killed by ${this.killedBy} · respawning in ${Math.max(0, Math.ceil(this.respawnT))}`, `NEXT CLASS: ${cls}`);

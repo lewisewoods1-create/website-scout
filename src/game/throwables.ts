@@ -5,7 +5,7 @@ import { LAYER_CHAR, LAYER_SMOKE } from './renderer';
 import { smokeTex } from './textures';
 import { mesh, rbox, setLayerDeep } from './util';
 
-export type ThrowKind = 'frag' | 'smoke' | 'stun';
+export type ThrowKind = 'frag' | 'smoke' | 'stun' | 'marker' | 'flare';
 
 interface Projectile<O> {
   kind: ThrowKind;
@@ -24,7 +24,17 @@ interface Smoke {
   sprites: { s: THREE.Sprite; off: THREE.Vector3; drift: THREE.Vector3 }[];
 }
 
-const FUSE: Record<ThrowKind, number> = { frag: 2.4, smoke: 1.2, stun: 1.4 };
+/** A thin coloured signal plume (doesn't block sight lines). */
+interface Plume {
+  pos: THREE.Vector3;
+  t: number;
+  life: number;
+  sprites: { s: THREE.Sprite; age: number; drift: THREE.Vector3 }[];
+  mat: THREE.SpriteMaterial;
+  emit: number;
+}
+
+const FUSE: Record<ThrowKind, number> = { frag: 2.4, smoke: 1.2, stun: 1.4, marker: 1.6, flare: 1.2 };
 const SMOKE_LIFE = 14;
 const SMOKE_R = 4.5;
 const G = 14;
@@ -63,13 +73,32 @@ export function buildGrenadeModels(m: Materials, layer = LAYER_CHAR): Record<Thr
   mesh(rbox(0.012, 0.004, 0.065, 0.0015), m.steel, stun, { pos: [0, 0.05, 0.028], rot: [-1.2, 0, 0] });
   pinRing(stun, 0.068);
 
-  for (const g of [frag, smoke, stun]) {
+  // supply-drop marker: red signal canister with a striped band
+  const marker = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({ color: 0xb3261e, roughness: 0.5, metalness: 0.1 });
+  mesh(cyl(0.028, 0.13), red, marker);
+  for (const y of [-0.035, 0.0, 0.035]) mesh(cyl(0.0285, 0.008), m.webbing, marker, { pos: [0, y, 0] });
+  mesh(cyl(0.031, 0.02), m.steel, marker, { pos: [0, 0.07, 0] });
+  mesh(new THREE.SphereGeometry(0.012, 12, 8), m.laserRed, marker, { pos: [0, 0.084, 0] }); // beacon
+  mesh(rbox(0.012, 0.004, 0.07, 0.0015), m.steel, marker, { pos: [0, 0.058, 0.03], rot: [-1.2, 0, 0] });
+  pinRing(marker, 0.074);
+
+  // mortar flare: paper-wrapped stick with a striker cap
+  const flare = new THREE.Group();
+  const paper = new THREE.MeshStandardMaterial({ color: 0xd8442c, roughness: 0.8 });
+  mesh(cyl(0.017, 0.2, 20), paper, flare);
+  mesh(cyl(0.0175, 0.03, 20), m.polymer, flare, { pos: [0, 0.105, 0] });
+  mesh(cyl(0.0175, 0.012, 20), m.laserRed, flare, { pos: [0, -0.104, 0] });
+  for (let i = 0; i < 3; i++) mesh(cyl(0.0172, 0.006, 20), m.webbing, flare, { pos: [0, -0.04 + i * 0.04, 0] });
+  pinRing(flare, 0.124);
+
+  for (const g of [frag, smoke, stun, marker, flare]) {
     setLayerDeep(g, layer);
     g.traverse((o) => {
       o.castShadow = true;
     });
   }
-  return { frag, smoke, stun };
+  return { frag, smoke, stun, marker, flare };
 }
 
 /**
@@ -129,7 +158,41 @@ export class Throwables<O> {
     return false;
   }
 
+  private plumes: Plume[] = [];
+
+  /** Coloured smoke rising from `at` for `life` seconds (supply-drop marker). */
+  plume(at: THREE.Vector3, color: number, life: number) {
+    const mat = new THREE.SpriteMaterial({ map: this.smokeMat.map, color, transparent: true, depthWrite: false, opacity: 0.8 });
+    this.plumes.push({ pos: at.clone(), t: 0, life, sprites: [], mat, emit: 0 });
+  }
+
+  private updatePlumes(dt: number) {
+    for (const pl of this.plumes) {
+      pl.t += dt;
+      pl.emit -= dt;
+      if (pl.t < pl.life && pl.emit <= 0 && pl.sprites.length < 40) {
+        pl.emit = 0.12;
+        const s = new THREE.Sprite(pl.mat.clone());
+        s.layers.set(LAYER_SMOKE);
+        s.material.rotation = Math.random() * Math.PI * 2;
+        this.scene.add(s);
+        pl.sprites.push({ s, age: 0, drift: new THREE.Vector3((Math.random() - 0.5) * 0.4, 2.2 + Math.random() * 0.8, (Math.random() - 0.5) * 0.4) });
+      }
+      for (const sp of pl.sprites) {
+        sp.age += dt;
+        sp.s.position.copy(pl.pos).addScaledVector(sp.drift, sp.age).add(new THREE.Vector3(Math.sin(sp.age * 0.7) * 0.3 * sp.age, 0.1, 0));
+        sp.s.scale.setScalar(0.5 + sp.age * 0.8);
+        sp.s.material.opacity = Math.max(0, 0.75 * (1 - sp.age / 4.5));
+      }
+      for (const sp of pl.sprites.filter((x) => x.age > 4.5)) this.scene.remove(sp.s);
+      pl.sprites = pl.sprites.filter((x) => x.age <= 4.5);
+    }
+    this.plumes = this.plumes.filter((p) => p.t < p.life || p.sprites.length);
+  }
+
   clear() {
+    for (const pl of this.plumes) for (const sp of pl.sprites) this.scene.remove(sp.s);
+    this.plumes = [];
     for (const p of this.live) this.scene.remove(p.obj);
     for (const s of this.smokes) for (const sp of s.sprites) this.scene.remove(sp.s);
     this.live = [];
@@ -173,6 +236,7 @@ export class Throwables<O> {
       }
     }
     this.live = this.live.filter((p) => p.fuse > 0);
+    this.updatePlumes(dt);
 
     for (const s of this.smokes) {
       s.t += dt;

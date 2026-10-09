@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import type { Game, MatchConfig, Mode, DifficultyId, Settings } from './game';
 import { DIFFICULTIES, MODES } from './game';
 import {
-  MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, GOLD_HEADS,
-  PRIMARY_IDS, camosFor, computeStats, fitsWeapon, fixAttachments, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
+  MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, DEAD_SIGNAL, GOLD_HEADS,
+  CAC_LEVEL, EXTRA_CLASS_LEVEL, PRIMARY_IDS, cacUnlocked, camosFor, classSlots, premadeClasses, computeStats, fitsWeapon, fixAttachments, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
   type Choice, type Loadout, type UnlockCtx, type WeaponClassId, type WeaponId,
 } from './loadout';
 import { buildWeapon, cfgFromLoadout } from './weapons';
@@ -59,6 +59,8 @@ export class Menu {
   private prestigeArmed = false;
   private chFilter: 'all' | 'open' | 'done' = 'all';
   private cacTab: 'classes' | 'streaks' = 'classes';
+  /** when the edited class was last saved (for the confirmation pill) */
+  private savedAt = 0;
   /** killstreak picks while fewer than three are chosen */
   private streakDraft: StreakId[] | null = null;
   private preview: Preview | null = null;
@@ -108,7 +110,7 @@ export class Menu {
     return this.context === 'pause'
       ? [['resume', 'RESUME', ''], ['cac', 'CREATE A CLASS', 'next spawn'], ['challenges', 'CHALLENGES', `${done}/100`], ['settings', 'SETTINGS', ''], ['quit', 'QUIT MATCH', '']]
       : [
-          ['mp', 'MULTIPLAYER', 'offline'], ['bots', 'BOT MATCH', ''], ['cac', 'CREATE A CLASS', ''], ['soldier', 'SOLDIER', ''],
+          ['mp', 'MULTIPLAYER', 'offline'], ['bots', 'BOT MATCH', ''], ['cac', 'CREATE A CLASS', cacUnlocked(this.level(), this.ctx.settings.unlockAll) ? '' : `lvl ${CAC_LEVEL}`], ['soldier', 'SOLDIER', ''],
           ['challenges', 'CHALLENGES', `${done}/100`], ['barracks', 'BARRACKS', ''], ['settings', 'SETTINGS', ''],
         ];
   }
@@ -374,8 +376,26 @@ export class Menu {
       <div class="streakgrid">${cards}</div>`;
   }
 
+  /** Before Create a Class unlocks: the premade classes, read-only. */
+  private cacLockedHtml() {
+    const cards = premadeClasses()
+      .map((cl) => {
+        const st = computeStats(cl);
+        return `<div class="card"><b>${cl.name}</b><span>${st.name} · ${OPTICS.find((o) => o.id === cl.optic)?.name ?? ''}</span>
+          <span>${WEAPONS[cl.secondary].name} · ${TACTICALS.find((t) => t.id === cl.tactical)?.name ?? ''}</span>
+          <span>${[PERKS1, PERKS2, PERKS3].map((list, i) => list.find((x) => x.id === [cl.perk1, cl.perk2, cl.perk3][i])?.name).join(' · ')}</span></div>`;
+      })
+      .join('');
+    return `<h2>CREATE A CLASS</h2>
+      <div class="prestige-box"><b>UNLOCKS AT LEVEL ${CAC_LEVEL}</b><span>Until then you deploy with the three premade classes below. At level ${CAC_LEVEL} you get three custom classes; classes 4 and 5 open at level ${EXTRA_CLASS_LEVEL}.</span></div>
+      ${this.cacTabs()}
+      <div class="label">PREMADE CLASSES</div><div class="grid2">${cards}</div>`;
+  }
+
   private cacHtml() {
     if (this.cacTab === 'streaks') return this.streaksHtml();
+    if (!cacUnlocked(this.level(), this.ctx.settings.unlockAll)) return this.cacLockedHtml();
+    this.editIndex = Math.min(this.editIndex, classSlots(this.level(), this.ctx.settings.unlockAll) - 1);
     const c = this.ctx.classes[this.editIndex];
     const pk = this.ctx.game.profileData.weaponKills;
     const prim = WEAPONS[c.weapon];
@@ -411,14 +431,21 @@ export class Menu {
       this.slotRow('perk2', 'PERK 2', PERKS2, c.perk2, {}, ''),
       this.slotRow('perk3', 'PERK 3', PERKS3, c.perk3, {}, ''),
     ].join('');
+    const slots = classSlots(this.level(), this.ctx.settings.unlockAll);
     const classList = this.ctx.classes
-      .map((cl, i) => `<button type="button" class="card ${this.editIndex === i ? 'on' : ''}" data-edit="${i}"><b>${esc(cl.name)}</b><span>${WEAPONS[cl.weapon].name}</span><span>${WEAPONS[cl.secondary].name} · ${TACTICALS.find((t) => t.id === cl.tactical)?.name ?? ''}</span></button>`)
+      .map((cl, i) =>
+        i < slots
+          ? `<button type="button" class="card ${this.editIndex === i ? 'on' : ''}" data-edit="${i}"><b>${i + 1} · ${esc(cl.name)}</b><span>${WEAPONS[cl.weapon].name}</span><span>${WEAPONS[cl.secondary].name} · ${TACTICALS.find((t) => t.id === cl.tactical)?.name ?? ''}</span></button>`
+          : `<button type="button" class="card locked" data-edit="${i}"><b>${i + 1} · LOCKED</b><span class="lock">UNLOCKS · LVL ${EXTRA_CLASS_LEVEL}</span></button>`,
+      )
       .join('');
+    const saved = this.savedAt && performance.now() - this.savedAt < 2500 ? '<span class="saved">✓ CLASS SAVED</span>' : '';
     return `<h2>CREATE A CLASS</h2><div class="sub">${this.context === 'pause' ? 'Changes apply on your next spawn.' : 'Attachments unlock with kills on each gun. Camos unlock with headshot kills.'}</div>
       ${this.cacTabs()}
       <div class="cac-layout">
         <div class="cac-classes"><div class="label" style="margin-top:0">CLASSES</div>${classList}
-          <div class="label">NAME</div><input class="name" id="cname" maxlength="14" aria-label="Class name" value="${esc(c.name)}"></div>
+          <div class="label">RENAME</div><input class="name" id="cname" maxlength="14" aria-label="Class name" value="${esc(c.name)}">
+          <button type="button" class="go small" data-act="saveclass">SAVE CLASS</button>${saved}</div>
         <div class="cac-view">
           <div class="studio" style="margin-top:0"><div id="preview-slot" data-kind="${showSecondary ? 'secondary' : 'primary'}"></div><div class="studio-info"><b>${w.name}</b>${bars}</div></div>
           <div class="label">${showSecondary ? 'SIDEARM' : 'PRIMARY'} STATS</div>${this.statSheet(c, showSecondary ? 'secondary' : 'primary')}
@@ -428,7 +455,7 @@ export class Menu {
   }
 
   private bannerCard(b: Banner, locked: boolean, on: boolean, lockLabel: string) {
-    return `<button type="button" class="bcard ${b.art ? 'art' : ''} ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}">
+    return `<button type="button" class="bcard ${b.art ? 'art' : ''} ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}"${b.sheet ? ' data-psheet' : ''}>
       ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}${b.art ? '' : `<span class="bname">${b.name}</span>`}${locked ? `<span class="block">${lockLabel}</span>` : ''}</button>`;
   }
 
@@ -489,7 +516,12 @@ export class Menu {
     const p = this.ctx.game.profileData;
     const all = this.ctx.settings.unlockAll;
     const cls = Object.entries(WEAPON_CLASSES) as [WeaponClassId, (typeof WEAPON_CLASSES)[WeaponClassId]][];
-    return cls
+    const prisms = cls.filter(([id]) => hasMastery(p.weaponHeads, id)).length;
+    const signal = all || prisms === cls.length;
+    const top = `<div class="mastery ${signal ? 'got' : ''}">
+      <div class="mh"><i class="sw big" style="background:${DEAD_SIGNAL.swatch}"></i><div><b>DEAD SIGNAL</b>
+        <span>${signal ? 'UNLOCKED for every weapon.' : `Earn Prism in every class · ${prisms} / ${cls.length} CLASSES`}</span></div></div></div>`;
+    return top + cls
       .map(([id, wc]) => {
         const mastered = all || hasMastery(p.weaponHeads, id);
         const golds = wc.weapons.filter((w) => hasGold(p.weaponHeads, w)).length;
@@ -550,7 +582,7 @@ export class Menu {
         </div>
         <div>
           <div class="label" style="margin-top:0">CAMOS & MASTERY</div>
-          <div class="sub">Five camos per weapon from headshot kills, then gold at ${GOLD_HEADS}. Gold on every weapon in a class unlocks that class's mastery camo.</div>
+          <div class="sub">Five camos per weapon from headshot kills (20, 50, 100, 200, 500), then Gold. Gold on every weapon in a class unlocks Prism for that class; Prism in every class unlocks Dead Signal.</div>
           ${this.camoTrack()}
         </div>
       </div>
@@ -577,6 +609,14 @@ export class Menu {
           this.ctx.startMatch({ mode: this.mode, difficulty: this.difficulty, classIndex: 0, mapId });
         }
         if (act === 'tobots') this.select('bots');
+        if (act === 'saveclass') {
+          const input = panel.querySelector('#cname') as HTMLInputElement | null;
+          if (input) this.ctx.classes[this.editIndex].name = input.value.trim().toUpperCase().slice(0, 14) || `CLASS ${this.editIndex + 1}`;
+          saveClasses(this.ctx.classes);
+          this.savedAt = performance.now();
+          if (this.context === 'pause') g.setClass(this.editIndex, this.ctx.classes);
+          rerender();
+        }
         if (act === 'prestige') {
           if (!this.prestigeArmed) this.prestigeArmed = true;
           else {
@@ -638,6 +678,7 @@ export class Menu {
           if (!camo || !isUnlocked(camo, this.ctxFor(this.weaponCtx(w)))) c[camoKey] = 'none';
         }
         saveClasses(this.ctx.classes);
+        this.savedAt = performance.now();
         this.openSlot = key === 'secondary' ? 'secondary' : null;
         if (this.context === 'pause') g.setClass(this.editIndex, this.ctx.classes);
         rerender();
@@ -657,6 +698,7 @@ export class Menu {
     name?.addEventListener('change', () => {
       this.ctx.classes[this.editIndex].name = name.value.trim().toUpperCase().slice(0, 14) || `CLASS ${this.editIndex + 1}`;
       saveClasses(this.ctx.classes);
+      this.savedAt = performance.now();
       rerender();
     });
     const call = panel.querySelector('#callsign') as HTMLInputElement | null;

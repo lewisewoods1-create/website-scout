@@ -1,4 +1,4 @@
-import type { CamoId } from './textures';
+import { camoSwatch, type CamoId } from './camos';
 
 export type PrimaryId = 'kr4' | 'vk47' | 'vx9' | 'sp45' | 'lm5' | 'pk7' | 'kestrel' | 'warden' | 'talon' | 'vulture' | 'mk20' | 'sk10';
 export type SecondaryId = 'p9' | 'r357';
@@ -177,6 +177,8 @@ export interface Choice<T extends string = string> {
   heads?: number;
   /** mastery camo: needs gold on every weapon in this class */
   mastery?: WeaponClassId;
+  /** Dead Signal: needs Prism in every class */
+  ultimate?: boolean;
   /** attachment only fits these weapon classes (default: all) */
   classes?: WeaponClassId[];
   swatch?: string;
@@ -232,42 +234,47 @@ export const PERKS3: Choice<Perk3>[] = [
 ];
 // ---------------------------------------------------------------- camos
 
-/** Per-weapon camos, earned with headshot kills on that weapon. Gold is the sixth. */
+/**
+ * Camos from the overlay pack, per weapon: five from headshot kills, Gold once all five
+ * are done, Prism for gold on every weapon in the class, Dead Signal for Prism in every class.
+ */
+const cm = (id: CamoId, name: string, extra: Partial<Choice<CamoId>> = {}): Choice<CamoId> => ({ id, name, desc: '', swatch: camoSwatch(id), ...extra });
 export const CAMOS: Choice<CamoId>[] = [
-  { id: 'none', name: 'FACTORY', desc: 'Stock finish.', swatch: '#1d1f21' },
-  { id: 'desert', name: 'DESERT DIGITAL', desc: '', heads: 10, swatch: '#b49a6b' },
-  { id: 'woodland', name: 'WOODLAND', desc: '', heads: 25, swatch: '#5d6b3a' },
-  { id: 'urban', name: 'URBAN', desc: '', heads: 50, swatch: '#8c9094' },
-  { id: 'arctic', name: 'ARCTIC SPLINTER', desc: '', heads: 75, swatch: '#c9d6df' },
-  { id: 'crimson', name: 'CRIMSON TIGER', desc: '', heads: 100, swatch: '#7a1a14' },
-  { id: 'gold', name: 'GOLD', desc: 'Weapon mastered.', heads: 150, swatch: '#c9a24a' },
+  cm('none', 'FACTORY', { desc: 'Stock finish.' }),
+  cm('grunt_grid', 'GRUNT GRID', { heads: 20 }),
+  cm('rubble', 'RUBBLE', { heads: 50 }),
+  cm('sand_tiger', 'SAND TIGER', { heads: 100 }),
+  cm('frostbite', 'FROSTBITE', { heads: 200 }),
+  cm('red_static', 'RED STATIC', { heads: 500 }),
+  cm('gold', 'GOLD', { desc: 'All five camos earned on this weapon.', heads: 500 }),
 ];
-export const GOLD_HEADS = 150;
+export const GOLD_HEADS = 500;
 
-const mc = (id: CamoId, name: string, cls: WeaponClassId, what: string, swatch: string): Choice<CamoId> => ({
-  id, name, desc: `Mastery camo: gold on every ${what}.`, mastery: cls, swatch,
-});
 const inClass = (c: WeaponClassId) => (Object.keys(WEAPONS) as WeaponId[]).filter((w) => WEAPONS[w].cls === c);
 
 export const WEAPON_CLASSES: Record<WeaponClassId, { name: string; short: string; weapons: WeaponId[]; camo: Choice<CamoId> }> = {
-  ar: { name: 'ASSAULT RIFLES', short: 'ASSAULT', weapons: inClass('ar'), camo: mc('obsidian', 'OBSIDIAN', 'ar', 'assault rifle', '#1a1024') },
-  smg: { name: 'SMGS', short: 'SMG', weapons: inClass('smg'), camo: mc('neon', 'NEON GRID', 'smg', 'SMG', '#ff3fd2') },
-  heavy: { name: 'HEAVY', short: 'HEAVY', weapons: inClass('heavy'), camo: mc('magma', 'MAGMA', 'heavy', 'heavy weapon', '#ff5a1a') },
-  sniper: { name: 'SNIPERS', short: 'SNIPER', weapons: inClass('sniper'), camo: mc('void', 'VOID', 'sniper', 'sniper', '#2a1a6b') },
-  marksman: { name: 'MARKSMAN RIFLES', short: 'MARKSMAN', weapons: inClass('marksman'), camo: mc('circuit', 'CIRCUIT', 'marksman', 'marksman rifle', '#19c48a') },
-  handgun: { name: 'HANDGUNS', short: 'HANDGUN', weapons: inClass('handgun'), camo: mc('prism', 'PRISM', 'handgun', 'handgun', '#7fd6e8') },
+  ar: { name: 'ASSAULT RIFLES', short: 'ASSAULT', weapons: inClass('ar'), camo: cm('prism', 'PRISM', { desc: 'Gold on every assault rifle.', mastery: 'ar' }) },
+  smg: { name: 'SMGS', short: 'SMG', weapons: inClass('smg'), camo: cm('prism', 'PRISM', { desc: 'Gold on every SMG.', mastery: 'smg' }) },
+  heavy: { name: 'HEAVY', short: 'HEAVY', weapons: inClass('heavy'), camo: cm('prism', 'PRISM', { desc: 'Gold on every heavy weapon.', mastery: 'heavy' }) },
+  sniper: { name: 'SNIPERS', short: 'SNIPER', weapons: inClass('sniper'), camo: cm('prism', 'PRISM', { desc: 'Gold on every sniper.', mastery: 'sniper' }) },
+  marksman: { name: 'MARKSMAN RIFLES', short: 'MARKSMAN', weapons: inClass('marksman'), camo: cm('prism', 'PRISM', { desc: 'Gold on every marksman rifle.', mastery: 'marksman' }) },
+  handgun: { name: 'HANDGUNS', short: 'HANDGUN', weapons: inClass('handgun'), camo: cm('prism', 'PRISM', { desc: 'Gold on every handgun.', mastery: 'handgun' }) },
 };
+
+/** The top camo: Prism earned in every weapon class. */
+export const DEAD_SIGNAL: Choice<CamoId> = cm('dead_signal', 'DEAD SIGNAL', { desc: 'Prism in every weapon class.', ultimate: true });
 
 export function classOf(w: WeaponId): WeaponClassId {
   return WEAPONS[w].cls;
 }
 
 export function camosFor(w: WeaponId): Choice<CamoId>[] {
-  return [...CAMOS, WEAPON_CLASSES[classOf(w)].camo];
+  return [...CAMOS, WEAPON_CLASSES[classOf(w)].camo, DEAD_SIGNAL];
 }
 
 export const hasGold = (heads: Record<string, number>, w: WeaponId) => (heads[w] ?? 0) >= GOLD_HEADS;
 export const hasMastery = (heads: Record<string, number>, c: WeaponClassId) => WEAPON_CLASSES[c].weapons.every((w) => hasGold(heads, w));
+export const hasDeadSignal = (heads: Record<string, number>) => (Object.keys(WEAPON_CLASSES) as WeaponClassId[]).every((c) => hasMastery(heads, c));
 
 export interface UnlockCtx {
   level: number;
@@ -282,11 +289,13 @@ export interface UnlockCtx {
 
 export function isUnlocked(c: Choice, ctx: UnlockCtx) {
   if (ctx.all) return true;
+  if (c.ultimate) return hasDeadSignal(ctx.allHeads ?? {});
   if (c.mastery) return hasMastery(ctx.allHeads ?? {}, c.mastery);
   return (c.level ?? 1) <= ctx.level && (c.kills ?? 0) <= ctx.kills && (c.heads ?? 0) <= (ctx.heads ?? 0);
 }
 
 export function lockText(c: Choice, weaponName: string) {
+  if (c.ultimate) return 'PRISM IN EVERY CLASS';
   if (c.mastery) return `GOLD ON ALL ${WEAPON_CLASSES[c.mastery].name}`;
   if (c.heads) return `${c.heads} HEADSHOT KILLS WITH ${weaponName}`;
   if (c.kills) return `${c.kills} KILLS WITH ${weaponName}`;
@@ -297,7 +306,25 @@ export const DEFAULT_CLASSES: Loadout[] = [
   { name: 'ASSAULT', weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'grip', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
   { name: 'RIFLEMAN', weapon: 'vk47', optic: 'iron', muzzle: 'none', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'pockets', perk2: 'hardhitter', perk3: 'quickhands' },
   { name: 'SPEC OPS', weapon: 'kr4', optic: 'reflex', muzzle: 'suppressor', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'suppressor', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
+  { name: 'CLASS 4', weapon: 'kr4', optic: 'holo', muzzle: 'none', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
+  { name: 'CLASS 5', weapon: 'vk47', optic: 'iron', muzzle: 'none', under: 'none', mag: 'std', camo: 'none', secondary: 'p9', secCamo: 'none', secAttach: 'none', tactical: 'smoke', perk1: 'fleet', perk2: 'hardhitter', perk3: 'steady' },
 ];
+
+/** Create a Class opens at this level; until then you play the three premade classes. */
+export const CAC_LEVEL = 4;
+/** Custom class slots 4 and 5 open here. */
+export const EXTRA_CLASS_LEVEL = 10;
+export const MAX_CLASSES = 5;
+
+export function classSlots(level: number, all = false) {
+  if (all) return MAX_CLASSES;
+  return level >= EXTRA_CLASS_LEVEL ? 5 : 3;
+}
+
+export const cacUnlocked = (level: number, all = false) => all || level >= CAC_LEVEL;
+
+/** Premade classes used before Create a Class unlocks (fresh copies, never edited). */
+export const premadeClasses = () => DEFAULT_CLASSES.slice(0, 3).map((c) => ({ ...c }));
 
 const KEY = 'deadpixel.classes.v1';
 
@@ -306,7 +333,8 @@ export function loadClasses(): Loadout[] {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const arr = JSON.parse(raw) as Loadout[];
-      if (Array.isArray(arr) && arr.length === 3) return arr.map((c, i) => ({ ...DEFAULT_CLASSES[i], ...c }));
+      // older saves had three classes: pad up to five
+      if (Array.isArray(arr) && arr.length >= 3) return DEFAULT_CLASSES.map((d, i) => ({ ...d, ...(arr[i] ?? {}) }));
     }
   } catch {
     // fall through to defaults

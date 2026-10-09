@@ -156,6 +156,8 @@ export class Bot implements Combatant {
   private thinkT = Math.random() * 0.1;
   private nadeT = 8 + Math.random() * 10;
   stunnedUntil = -99;
+  /** under fire from an attack drone: worse aim, slower to react */
+  suppressedUntil = -99;
 
   constructor(id: number, name: string, scene: THREE.Scene) {
     this.id = id;
@@ -441,6 +443,7 @@ export class Bot implements Combatant {
     else if (sp > 1) acc *= 0.85;
     if (t.crouch() > 0.5) acc *= 0.85;
     acc *= clamp(0.45 + this.trackT * 0.35, 0.45, 1.15) * w.difficulty.accuracy;
+    if (w.now < this.suppressedUntil) acc *= 0.5;
     const hit = Math.random() < acc;
 
     this.muzzle.updateWorldMatrix(true, false);

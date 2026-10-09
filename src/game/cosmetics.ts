@@ -2,6 +2,7 @@ import type { Choice } from './loadout';
 import { MAX_LEVEL, xpForLevel, levelForXp, type Profile } from './progression';
 import { badgeImg, rankInfo } from './badges';
 import { CHALLENGES, cardArt } from './challenges';
+import { asset } from './assets';
 
 /**
  * Banners (calling cards), soldier looks and the player card.
@@ -17,6 +18,8 @@ export interface Banner {
   challenge?: string;
   /** calling-card artwork (title is drawn into the art) */
   art?: string;
+  /** animated banner: 6x6 sprite sheet, 36 frames on the prestige badge clock */
+  sheet?: string;
   bg: string;
   motif?: string;
 }
@@ -38,13 +41,20 @@ export const BANNERS: Banner[] = [
   { id: 'reaper', name: 'REAPER', level: 55, bg: 'linear-gradient(90deg,#050505,#2a2a2a)', motif: skull },
   { id: 'gold', name: 'GOLD STANDARD', level: 70, bg: 'linear-gradient(115deg,#7a5a1a,#f2dc8a 45%,#c9a24a 55%,#7a5a1a)' },
   { id: 'commander', name: 'COMMANDER', level: 75, bg: 'linear-gradient(90deg,#0b0809,#2a1f10)', motif: star },
-  ...Array.from({ length: 10 }, (_, i) => ({
-    id: `prestige${i + 1}`,
-    name: `PRESTIGE ${i + 1}`,
-    prestige: i + 1,
-    bg: `linear-gradient(115deg, hsl(${(i * 36 + 200) % 360} 50% 12%), hsl(${(i * 36 + 200) % 360} 60% 32%) 60%, hsl(${(i * 36 + 220) % 360} 70% 50%))`,
-    motif: star,
-  })),
+  // prestige banners from the Dead Pixels pack; 4-10 animate
+  ...Array.from({ length: 10 }, (_, i): Banner => {
+    const n = String(i + 1).padStart(2, '0');
+    const art = asset(`prestige/prestige_${n}.png`);
+    const sheet = i >= 3 ? asset(`prestige/prestige_${n}_sheet.png`) : undefined;
+    return {
+      id: `prestige${i + 1}`,
+      name: `PRESTIGE ${i + 1}`,
+      prestige: i + 1,
+      art,
+      sheet,
+      bg: sheet ? `url(${sheet}) 0 0 / 600% 600% no-repeat, #111` : `url(${art}) center / 100% 100% no-repeat, #111`,
+    };
+  }),
   ...CHALLENGES.map((c): Banner => ({
     id: c.id,
     name: c.name,
@@ -102,7 +112,7 @@ export function playerCard(p: Profile, opts: { compact?: boolean } = {}) {
   if (b.art) {
     // calling card: keep the artwork (and its title) clear, name strip underneath
     return `<div class="pcard art ${opts.compact ? 'compact' : ''}">
-      <div class="pc-art" style="background:${b.bg}"></div>
+      <div class="pc-art" style="background:${b.bg}"${b.sheet ? ' data-psheet' : ''}></div>
       <div class="pc-strip"><div class="pc-badge">${badge(level, p.prestige, opts.compact ? 34 : 40)}</div>
         <div class="pc-text"><div class="pc-name">${esc(p.callsign)}</div>
         <div class="pc-rank">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LVL ${level} · ${rankInfo(level).name.toUpperCase()}</div></div></div>

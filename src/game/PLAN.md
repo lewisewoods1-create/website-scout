@@ -69,6 +69,60 @@ Theme ideas to pick from (TBC):
 
 Needs before more maps: stairs/ramps and a second floor in the collision and nav code (both are flat today), and per-map spawn tuning.
 
+### Scope: two bigger maps (proposed, not built)
+
+Both are **96×96 m** (2.25× the area of today's 64 m maps), sized for 6v6 TDM with room for 9v9 later.
+Each keeps the PS1 low-res world and adds full-res "hero" props in the character layer (fire, sparks, glass).
+
+#### Map A — GRIDLOCK (motorway pile-up at dusk)
+A six-lane elevated motorway jammed with a multi-car pile-up, over a flooded underpass.
+```
+   N  ┌──────────────────────────────────────────────┐
+      │ toll booths ▢▢▢▢      service station ⛽     │  ← north spawn (behind toll plaza)
+      │  ═══════ upper deck (ramps both ends) ═══════  │
+      │  🚗🔥 🚌(on side) 🚚 🚗🔥  jack-knifed tanker   │  ← lanes of wrecks = broken cover
+      │  ═══════════════════════════════════════════  │
+      │ ░░ underpass: pillars, flooded lane, maintenance tunnel ░░ │
+      │  billboard catwalk     overturned bus (walk-through)        │
+      │ car park + burnt-out shop row        dense hedges / verge  │  ← south spawn
+   S  └──────────────────────────────────────────────┘
+```
+- **Lanes:** upper deck (long sightlines for snipers), underpass (close quarters, SMGs), verge and car park on the flanks.
+- **Hiding spots:** inside the overturned bus, behind the toll booth glass, dark maintenance tunnel, verge hedges (soft cover that blocks sight like smoke), under the tanker.
+- **Assets to build:** 4 car models (hatch, saloon, van, pickup) × burnt/clean variants, bus (walk-through), tanker + cab, toll booths, Jersey barriers, lamp posts, billboard with catwalk, pillars, crash debris (tyres, glass, cones).
+- **FX:** looping fire on 4-6 wrecks (sprite flames + flicker light + heat-haze-free smoke column), sparking power line, drifting smoke, puddle reflections in the underpass.
+- **Hazard (optional):** the tanker can be shot to explode once per match (mortar-sized blast).
+
+#### Map B — SCRAPLINE (scrapyard and rail sidings in fog)
+A crusher yard of stacked car wrecks beside rail sidings, with a two-storey office block.
+```
+   N  ┌──────────────────────────────────────────────┐
+      │ rail sidings: 3 tracks, boxcars (open doors = shortcuts) │  ← north spawn
+      │   ▭▭▭▭  ▭▭▭▭▭  ▭▭▭                                       │
+      │ crane + magnet  ║  scrap-car stacks (maze, 2-3 high)       │
+      │   crusher shed  ║  burning oil drums 🔥  tyre walls        │
+      │ 2-floor office (stairs, windows, roof hatch)  weighbridge   │
+      │ parts warehouse (shelving aisles)   yard gate + dog kennels │  ← south spawn
+   S  └──────────────────────────────────────────────┘
+```
+- **Lanes:** rail line (long), scrap maze (short and twisty), office/warehouse (indoor, vertical).
+- **Hiding spots:** inside boxcars, gaps in the scrap stacks, under the crane cab, the office roof, shelving aisles, tyre walls.
+- **Assets to build:** stacked crushed-car blocks (3 variants), boxcars, crane with dangling magnet, crusher shed, office block with stairs, shelving, oil drums (some burning), tyre walls, chain-link fence.
+- **FX:** burning oil drums, fog banks that roll through the rail line, crane magnet swaying, sparks from a cutting torch.
+
+#### Engine work both maps need
+| Work | Why | Estimate |
+|---|---|---|
+| Ramps/stairs + second floor in collision and the nav grid (multi-level A*) | Motorway deck, office block | 2-3 days |
+| Map size per map (`half` already per-map) + minimap scaling + spawn sets per team | Bigger arenas | 0.5 day |
+| Prop library: instanced models with LOD, baked into the low-res world layer | Cars, wrecks, drums, barriers | 2 days |
+| Fire/flame FX (sprite flames, flicker lights, smoke columns) with a per-map budget | "Cars on fire" | 1 day |
+| Soft cover: foliage/hedges that block bot sight lines like smoke but not bullets | Hiding spots that work against bots | 0.5 day |
+| Bot tuning for long lanes (snipers hold angles, flankers use tunnels) | Bigger maps change how bots fight | 1 day |
+| Per-map lighting/theme, sky, ambience | Dusk motorway / foggy yard | 0.5 day each |
+
+**Total:** about 8-10 days for both maps, engine work first. Performance target stays at 60 fps on a 2019 integrated GPU at 480p; props merge per material like the soldiers do.
+
 ---
 
 ## 4. Pets (later)
@@ -99,10 +153,12 @@ A small companion that **floats just under the gun** in first person and reacts 
   vector SVG at runtime (output is byte-identical to the pack's SVG files), and animates prestige 4-10 live.
   The pack defines 75 levels (25 ranks x 3 tiers), one badge per level.
 - Banners (calling cards) unlock by level, prestige and challenges; the Soldier page picks the active one.
-- Camos: five per weapon from headshot kills (10/25/50/75/100), gold at 150. Gold on every weapon in a class
-  (assault rifles, handguns) unlocks that class's mastery camo (Obsidian, Prism). Progress lives in Barracks.
-- Challenges: 100 across combat, weapons, tactics, streaks, matches and career (`challenges.ts`). Each unlocks
-  banner #001–#100. Artwork goes in `public/game/banners/ch-NNN.webp`; flip `BANNER_ART_READY` once it's in.
+- Camos (camo overlay pack): Grunt Grid 20, Rubble 50, Sand Tiger 100, Frostbite 200, Red Static 500 headshot kills,
+  then Gold. Gold on every weapon in a class unlocks Prism for that class; Prism in every class unlocks Dead Signal.
+  Prism and Dead Signal animate. Progress lives in Barracks.
+- Create a Class opens at level 4 (premade classes until then); custom classes 4 and 5 open at level 10.
+- Challenges: 100, one per calling card (`challenges.ts`, art in `public/game/cards/`).
+- Prestige banners: the prestige pack (`public/game/prestige/`); 4-10 animate from 6x6 sprite sheets on the badge clock.
 
 ## 6. Weapons
 
@@ -131,7 +187,13 @@ Open questions: unlock levels, whether sidearms get their own mastery camo (they
 ## 7. Killstreaks
 
 Pick 3 in Create a Class > Killstreaks; earned with kills in one life, stacked, [4] calls in the newest.
-Radar Sweep (3), Supply Drop (4), Mortar Strike (5), Sentry Gun (6), Airstrike (7), Attack Drone (9), System Crash (25, ends the match).
+- Radar Sweep (3): enemies on the minimap for 30 s.
+- Supply Drop (4): throw a marker; a crate parachutes onto the red smoke; hold [F] at it for a random killstreak.
+- Mortar Strike (5): throw a flare; five heavy shells land around it.
+- Sentry Gun (6): carry a ghost sentry, [F] to place; it can't be moved and guards for 60 s.
+- Airstrike (7): map tablet, aim and rotate the sweep line, [F] to send the jet.
+- Attack Drone (9): rides behind your head, light rounds that suppress enemies (halves their aim).
+- System Crash (25): screen hacked, 5-second countdown, electric wave kills every enemy and ends the match.
 Next: enemy bots using streaks, shooting down the drone, and EMP-style counters.
 
 ## 8. Suggested order

@@ -1,4 +1,4 @@
-import { PERKS1, PERKS2, PERKS3, SECONDARIES, TACTICALS, type Choice } from './loadout';
+import { CAC_LEVEL, EXTRA_CLASS_LEVEL, PERKS1, PERKS2, PERKS3, SECONDARIES, TACTICALS, type Choice } from './loadout';
 import { BANNERS, GEAR, HEADGEAR, UNIFORMS } from './cosmetics';
 import { MAX_LEVEL } from './progression';
 
@@ -17,6 +17,8 @@ export function unlockTrack(): Map<number, string[]> {
   list(GEAR, 'GEAR');
   list(HEADGEAR, 'HEADGEAR');
   BANNERS.forEach((b) => add(b.level, `BANNER: ${b.name}`));
+  add(CAC_LEVEL, 'CREATE A CLASS');
+  add(EXTRA_CLASS_LEVEL, 'CLASS SLOTS 4 & 5');
   return new Map([...track.entries()].sort((a, b) => a[0] - b[0]));
 }
 

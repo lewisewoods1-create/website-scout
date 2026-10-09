@@ -261,14 +261,28 @@ export class Sfx {
     src.stop(t + 4.5);
   }
 
-  /** System Crash: a falling digital tear-down. */
+  /** System Crash: modem-like data chatter as the screen is taken over. */
   systemCrash() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    const out = this.out(0.5, 0);
-    for (let i = 0; i < 14; i++) this.tone(out, t + i * 0.12, 0.1, 1800 - i * 110, 1700 - i * 110, 'square', 0.25);
-    this.tone(out, t + 1.7, 1.8, 220, 30, 'sawtooth', 0.6);
-    this.burst(out, t + 1.7, 2, 'lowpass', 800, 0.5, 1);
+    const out = this.out(0.4, 0);
+    for (let i = 0; i < 24; i++) {
+      const f = 600 + Math.random() * 2400;
+      this.tone(out, t + i * 0.045, 0.04, f, f, 'square', 0.22);
+    }
+    this.burst(out, t, 1.1, 'bandpass', 2600, 6, 0.4);
+    this.tone(out, t + 1.1, 0.5, 1800, 200, 'sawtooth', 0.3);
+  }
+
+  /** The System Crash wave: a crackling electric surge and a deep boom. */
+  electricWave() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const out = this.out(0.6, 0);
+    for (let i = 0; i < 18; i++) this.burst(out, t + Math.random() * 1.1, 0.05 + Math.random() * 0.08, 'highpass', 3000 + Math.random() * 4000, 1, 0.9);
+    this.tone(out, t, 1.6, 90, 25, 'sawtooth', 0.8);
+    this.tone(out, t, 0.9, 1200, 60, 'square', 0.25);
+    this.burst(out, t, 2.2, 'lowpass', 600, 0.5, 1.1);
   }
 
   melee(hit: boolean) {

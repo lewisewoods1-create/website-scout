@@ -27,17 +27,17 @@ export interface StreakDef {
 export const STREAKS: Record<StreakId, StreakDef> = {
   sweep: { id: 'sweep', name: 'RADAR SWEEP', kills: 3, desc: 'Shows every enemy on the minimap for 30 seconds.',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 3a7 7 0 016.9 6H12V5zm-1 0v7h7a7 7 0 11-7-7z' },
-  supply: { id: 'supply', name: 'SUPPLY DROP', kills: 4, desc: 'A crate drops at your feet: full ammo, grenades, and a chance of a bonus killstreak.',
+  supply: { id: 'supply', name: 'SUPPLY DROP', kills: 4, desc: 'Throw a marker. A crate parachutes onto the red smoke: walk up and hold [F] to claim a random killstreak.',
     icon: 'M3 8l9-5 9 5v8l-9 5-9-5zm9-2.7L6.2 8.5 12 11.7l5.8-3.2zM5 10.2v4.6l6 3.3v-4.6zm14 0l-6 3.3v4.6l6-3.3z' },
-  mortar: { id: 'mortar', name: 'MORTAR STRIKE', kills: 5, desc: 'Three shells land on the enemy, one after another.',
+  mortar: { id: 'mortar', name: 'MORTAR STRIKE', kills: 5, desc: 'Throw a flare. Five heavy shells land around it with big splash damage.',
     icon: 'M11 2h2v4l3 3v9l-4 4-4-4V9l3-3z' },
-  sentry: { id: 'sentry', name: 'SENTRY GUN', kills: 6, level: 5, desc: 'An automated turret guards the spot you place it for 45 seconds.',
+  sentry: { id: 'sentry', name: 'SENTRY GUN', kills: 6, level: 5, desc: 'Carry the sentry in front of you and press [F] to put it down. Once placed it can\'t be moved; it guards the spot for 60 seconds.',
     icon: 'M4 9h11V6h3v3h3v4H8v3H4zm3 7l-3 6h2l2.5-5zm4 0l2.5 6h2l-3-6z' },
-  airstrike: { id: 'airstrike', name: 'AIRSTRIKE', kills: 7, level: 12, air: true, desc: 'A jet carpets a line of bombs through the enemy.',
+  airstrike: { id: 'airstrike', name: 'AIRSTRIKE', kills: 7, level: 12, air: true, desc: 'Opens a map tablet: aim the sweep line, rotate it with the mouse wheel or R, and press [F] to send the jet.',
     icon: 'M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z' },
-  drone: { id: 'drone', name: 'ATTACK DRONE', kills: 9, level: 18, air: true, desc: 'Hovers over you and fires on any enemy it can see for 30 seconds.',
+  drone: { id: 'drone', name: 'ATTACK DRONE', kills: 9, level: 18, air: true, desc: 'Rides behind your head for 30 seconds, firing light rounds that keep enemies suppressed.',
     icon: 'M2 5h6v2H6v2h12V7h-2V5h6v2h-2v2h-1v2h-3l-2 4h-4l-2-4H5V9H4V7H2zm8 11h4v2h-4z' },
-  crash: { id: 'crash', name: 'SYSTEM CRASH', kills: 25, level: 30, desc: 'Corrupts the server: every enemy dies and the match ends.',
+  crash: { id: 'crash', name: 'SYSTEM CRASH', kills: 25, level: 30, desc: 'Hacks the server: a 5-second countdown, then an electric wave kills every enemy and ends the match.',
     icon: 'M3 3h18v14H3zm2 2v10h14V5zm2 2h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2zm-6 4h6v2H9zM8 19h8v2H8z' },
 };
 
@@ -55,6 +55,7 @@ export interface StreakHost {
   sfx: Sfx;
   now(): number;
   playerFeet(): THREE.Vector3;
+  playerEye(): THREE.Vector3;
   playerYaw(): number;
   playerAlive(): boolean;
   /** live enemies of the player */
@@ -65,99 +66,161 @@ export interface StreakHost {
   explode(pos: THREE.Vector3, label: StreakId, radius: number, damage: number): void;
   /** player-owned bullet from a streak */
   shoot(from: THREE.Vector3, bot: Bot, damage: number, label: StreakId): void;
+  /** pin a bot down: worse aim and slower reactions for a moment */
+  suppress(bot: Bot): void;
+  /** coloured signal smoke */
+  plume(pos: THREE.Vector3, color: number, life: number): void;
   /** soundscape helpers */
   pan(pos: THREE.Vector3): { dist: number; pan: number };
-  /** supply crate pickup */
-  resupply(): void;
 }
 
-interface Crate { obj: THREE.Group; vy: number; landed: boolean; life: number }
-interface Gunner { obj: THREE.Group; head: THREE.Object3D; life: number; cool: number; range: number; rate: number; dmg: number; acc: number; label: StreakId }
+export interface Crate { obj: THREE.Group; vy: number; landed: boolean; life: number }
+interface Gunner {
+  obj: THREE.Group;
+  head: THREE.Object3D;
+  life: number;
+  cool: number;
+  range: number;
+  rate: number;
+  dmg: number;
+  acc: number;
+  label: StreakId;
+}
+interface Flare { obj: THREE.Group; light: THREE.PointLight; life: number }
 interface Timed { at: number; fn: () => void }
 
 export class StreakRuntime {
   private host: StreakHost;
   private crates: Crate[] = [];
   private gunners: Gunner[] = [];
+  private flares: Flare[] = [];
   private timers: Timed[] = [];
   private jet: { obj: THREE.Group; from: THREE.Vector3; to: THREE.Vector3; t: number } | null = null;
+  private ghost: THREE.Group;
+  private ghostMats: THREE.MeshBasicMaterial[] = [];
   private tmp = new THREE.Vector3();
 
   constructor(host: StreakHost) {
     this.host = host;
+    // translucent sentry used while choosing where to put it down
+    this.ghost = buildSentry(host.mats);
+    this.ghost.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const gm = new THREE.MeshBasicMaterial({ color: 0x6cff8a, transparent: true, opacity: 0.38, depthWrite: false });
+      this.ghostMats.push(gm);
+      m.material = gm;
+      m.castShadow = false;
+    });
+    this.ghost.visible = false;
+    host.scene.add(this.ghost);
   }
 
   private later(secs: number, fn: () => void) {
     this.timers.push({ at: this.host.now() + secs, fn });
   }
 
-  /** Call in a streak. Sweep and System Crash are handled by the game itself. */
-  activate(id: StreakId) {
+  // ---- supply drop: the thrown marker smokes red, a crate parachutes onto it
+
+  markerLanded(pos: THREE.Vector3) {
     const h = this.host;
-    const feet = h.playerFeet();
-    const yaw = h.playerYaw();
-    const ahead = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    if (id === 'supply') {
-      const obj = buildCrate(h.mats);
-      obj.position.copy(feet).addScaledVector(ahead, 2.2).setY(feet.y + 26);
+    h.plume(pos, 0xd83020, 16);
+    const obj = buildCrate(h.mats);
+    obj.position.copy(pos).setY(pos.y + 32);
+    this.later(2, () => {
       h.scene.add(obj);
-      this.crates.push({ obj, vy: -9, landed: false, life: 60 });
-    } else if (id === 'mortar') {
-      for (let i = 0; i < 3; i++) {
-        this.later(1.4 + i * 0.8, () => {
-          const target = this.pickTarget(5);
-          if (!target) return;
-          const { dist, pan } = h.pan(target);
-          h.sfx.whistle(dist, pan);
-          this.later(0.55, () => h.explode(target, 'mortar', 7.5, 190));
-        });
-      }
-    } else if (id === 'sentry') {
-      const obj = buildSentry(h.mats);
-      // ahead and off to the right so it doesn't block your view
-      const right = new THREE.Vector3(-ahead.z, 0, ahead.x);
-      obj.position.copy(feet).addScaledVector(ahead, 2.4).addScaledVector(right, 1.4);
-      obj.rotation.y = yaw;
-      h.scene.add(obj);
-      this.gunners.push({ obj, head: obj.getObjectByName('turret')!, life: 45, cool: 1, range: 34, rate: 0.12, dmg: 16, acc: 0.6, label: 'sentry' });
-    } else if (id === 'drone') {
-      const obj = buildDrone(h.mats);
-      obj.position.copy(feet).setY(feet.y + 7);
-      h.scene.add(obj);
-      this.gunners.push({ obj, head: obj.getObjectByName('turret')!, life: 30, cool: 1.2, range: 42, rate: 0.32, dmg: 26, acc: 0.55, label: 'drone' });
-    } else if (id === 'airstrike') {
-      const c = this.pickTarget(0) ?? feet.clone();
-      const ang = Math.random() * Math.PI;
-      const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
-      const obj = buildJet(h.mats);
-      const from = c.clone().addScaledVector(dir, -120).setY(38);
-      const to = c.clone().addScaledVector(dir, 120).setY(38);
-      obj.position.copy(from);
-      obj.lookAt(to);
-      h.scene.add(obj);
-      this.jet = { obj, from, to, t: 0 };
-      h.sfx.jet();
-      for (let i = 0; i < 7; i++) {
-        const p = c.clone().addScaledVector(dir, (i - 3) * 5).setY(0);
-        this.later(2.1 + i * 0.16, () => h.explode(p, 'airstrike', 6.5, 200));
-      }
+      this.crates.push({ obj, vy: -8, landed: false, life: 90 });
+      h.sfx.jet(); // the drop plane passing over
+    });
+  }
+
+  /** A landed crate within reach of `p`. */
+  crateNear(p: THREE.Vector3): Crate | null {
+    return this.crates.find((c) => c.landed && c.obj.position.distanceTo(p) < 2.2) ?? null;
+  }
+
+  claimCrate(c: Crate) {
+    c.life = 0;
+  }
+
+  // ---- mortar: a thrown flare marks the zone, five heavy shells walk across it
+
+  flareLanded(pos: THREE.Vector3) {
+    const h = this.host;
+    const obj = new THREE.Group();
+    obj.position.copy(pos);
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), h.mats.laserRed);
+    glow.position.y = 0.05;
+    obj.add(glow);
+    const light = new THREE.PointLight(0xff3a1a, 5, 9, 2);
+    light.position.y = 0.3;
+    obj.add(light);
+    h.scene.add(obj);
+    this.flares.push({ obj, light, life: 9 });
+    h.plume(pos, 0xff5a3a, 7);
+    for (let i = 0; i < 5; i++) {
+      this.later(1.3 + i * 0.85, () => {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * 7;
+        const target = pos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r)).setY(0);
+        const { dist, pan } = h.pan(target);
+        h.sfx.whistle(dist, pan);
+        this.later(0.55, () => h.explode(target, 'mortar', 9, 230));
+      });
     }
   }
 
-  /** An enemy position (plus scatter) to drop ordnance on, favouring groups. */
-  private pickTarget(scatter: number): THREE.Vector3 | null {
-    const es = this.host.enemies();
-    if (!es.length) return null;
-    let best = es[0];
-    let bestN = -1;
-    for (const e of es) {
-      const n = es.filter((o) => o.pos.distanceTo(e.pos) < 8).length;
-      if (n > bestN || (n === bestN && Math.random() < 0.5)) {
-        best = e;
-        bestN = n;
-      }
+  // ---- sentry: carried as a ghost until placed; once down it stays put
+
+  showGhost(on: boolean) {
+    this.ghost.visible = on;
+  }
+
+  moveGhost(pos: THREE.Vector3, yaw: number, valid: boolean) {
+    this.ghost.position.copy(pos);
+    this.ghost.rotation.y = yaw;
+    for (const m of this.ghostMats) m.color.set(valid ? 0x6cff8a : 0xff4a3a);
+  }
+
+  placeSentry(pos: THREE.Vector3, yaw: number) {
+    const h = this.host;
+    const obj = buildSentry(h.mats);
+    obj.position.copy(pos);
+    obj.rotation.y = yaw;
+    h.scene.add(obj);
+    this.gunners.push({ obj, head: obj.getObjectByName('turret')!, life: 60, cool: 1, range: 34, rate: 0.12, dmg: 16, acc: 0.6, label: 'sentry' });
+    const { dist, pan } = h.pan(pos);
+    h.sfx.thud(dist, pan);
+  }
+
+  // ---- airstrike along a chosen line
+
+  airstrike(center: THREE.Vector3, dir: THREE.Vector3) {
+    const h = this.host;
+    const d = dir.clone().setY(0).normalize();
+    const obj = buildJet(h.mats);
+    const from = center.clone().addScaledVector(d, -120).setY(38);
+    const to = center.clone().addScaledVector(d, 120).setY(38);
+    obj.position.copy(from);
+    obj.lookAt(to);
+    h.scene.add(obj);
+    this.jet = { obj, from, to, t: 0 };
+    h.sfx.jet();
+    for (let i = 0; i < 9; i++) {
+      const p = center.clone().addScaledVector(d, (i - 4) * 4.5).setY(0);
+      this.later(2.1 + i * 0.13, () => h.explode(p, 'airstrike', 6.5, 200));
     }
-    return best.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * scatter, 0, (Math.random() - 0.5) * scatter)).setY(0);
+  }
+
+  // ---- attack drone: rides behind your head, peppering enemies to keep their heads down
+
+  drone() {
+    const h = this.host;
+    const obj = buildDrone(h.mats);
+    obj.scale.setScalar(0.6);
+    obj.position.copy(h.playerEye());
+    h.scene.add(obj);
+    this.gunners.push({ obj, head: obj.getObjectByName('turret')!, life: 30, cool: 0.8, range: 38, rate: 0.11, dmg: 6, acc: 0.65, label: 'drone' });
   }
 
   update(dt: number) {
@@ -180,23 +243,30 @@ export class StreakRuntime {
           const { dist, pan } = h.pan(c.obj.position);
           h.sfx.thud(dist, pan);
         }
-      } else if (h.playerAlive() && c.obj.position.distanceTo(h.playerFeet()) < 1.8) {
-        c.life = 0;
-        h.resupply();
       }
     }
     for (const c of this.crates.filter((x) => x.life <= 0)) h.scene.remove(c.obj);
     this.crates = this.crates.filter((x) => x.life > 0);
 
-    const feet = h.playerFeet();
+    for (const f of this.flares) {
+      f.life -= dt;
+      f.light.intensity = (4 + Math.sin(now * 37) * 1.2 + Math.random() * 1.5) * Math.min(1, f.life);
+    }
+    for (const f of this.flares.filter((x) => x.life <= 0)) h.scene.remove(f.obj);
+    this.flares = this.flares.filter((x) => x.life > 0);
+
+    const eye = h.playerEye();
+    const yaw = h.playerYaw();
     for (const g of this.gunners) {
       g.life -= dt;
       g.cool -= dt;
       if (g.label === 'drone') {
-        // drift above the player, bobbing
-        const want = this.tmp.copy(feet).setY(feet.y + 7 + Math.sin(now * 1.7) * 0.4);
-        g.obj.position.lerp(want, 1 - Math.exp(-dt * 1.5));
-        g.obj.rotation.y += dt * 0.4;
+        // hover just behind and above your head, off the right shoulder
+        const back = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        const want = this.tmp.copy(eye).addScaledVector(back, 1.1).addScaledVector(right, 0.45).setY(eye.y + 0.55 + Math.sin(now * 2.3) * 0.06);
+        g.obj.position.lerp(want, 1 - Math.exp(-dt * 6));
+        g.obj.rotation.y = yaw;
         for (const r of ['rotor0', 'rotor1', 'rotor2', 'rotor3']) {
           const o = g.obj.getObjectByName(r);
           if (o) o.rotation.y += dt * 40;
@@ -215,14 +285,14 @@ export class StreakRuntime {
       }
       if (target) {
         const aim = target.spheres[1].c;
-        // turn the turret head toward the target (in its parent's frame)
         const local = g.head.parent!.worldToLocal(aim.clone());
         g.head.rotation.y = Math.atan2(-local.x, -local.z);
         if (g.cool <= 0) {
           g.cool = g.rate;
           h.effects.muzzle(muzzle);
           const { dist, pan } = h.pan(muzzle);
-          h.sfx.gunshot(dist, pan, g.label === 'drone' ? 'pk7' : 'lm5');
+          h.sfx.gunshot(dist, pan, g.label === 'drone' ? 'vx9' : 'lm5', g.label === 'drone');
+          if (g.label === 'drone') h.suppress(target);
           if (Math.random() < g.acc) h.shoot(muzzle, target, g.dmg, g.label);
           else h.effects.tracer(muzzle, aim.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() - 0.5, (Math.random() - 0.5) * 1.5)));
         }
@@ -247,9 +317,12 @@ export class StreakRuntime {
   clear() {
     for (const c of this.crates) this.host.scene.remove(c.obj);
     for (const g of this.gunners) this.host.scene.remove(g.obj);
+    for (const f of this.flares) this.host.scene.remove(f.obj);
     if (this.jet) this.host.scene.remove(this.jet.obj);
+    this.ghost.visible = false;
     this.crates = [];
     this.gunners = [];
+    this.flares = [];
     this.timers = [];
     this.jet = null;
   }

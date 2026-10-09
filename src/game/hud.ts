@@ -84,10 +84,33 @@ const CSS = `
 #hud .glitch::before { content: ''; position: absolute; inset: 0;
   background: repeating-linear-gradient(0deg, rgba(255,0,80,.25) 0 3px, transparent 3px 9px), repeating-linear-gradient(90deg, rgba(0,255,220,.18) 0 40px, transparent 40px 97px);
   animation: glitchBars .3s steps(3) infinite; }
-#hud .glitch div { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: 72px; letter-spacing: 8px; color: #fff;
+#hud .glitch .term { position: absolute; left: 6%; top: 14%; font-family: 'Courier New', monospace; font-size: 15px; line-height: 1.5; color: #7dffb0;
+  text-shadow: 0 0 6px #2aff7a; white-space: pre; opacity: .9; }
+#hud .glitch .cnt { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); font-size: 220px; color: #fff; line-height: 1;
+  text-shadow: -6px 0 #ff2a5a, 6px 0 #2ad4ff, 0 0 40px rgba(120,220,255,.8); }
+#hud .glitch .cnt.tick { animation: crashTick 1s ease-out; }
+@keyframes crashTick { 0% { transform: translate(-50%, -50%) scale(1.6); opacity: 0 } 15% { transform: translate(-50%, -50%) scale(1); opacity: 1 } 100% { opacity: .85 } }
+#hud .wave { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border-radius: 50%; display: none;
+  box-shadow: 0 0 0 6px #bfefff, 0 0 40px 20px rgba(120,220,255,.9), inset 0 0 40px 20px rgba(120,220,255,.6); }
+#hud .wave.on { display: block; animation: waveOut 1.4s cubic-bezier(.2,.7,.3,1) forwards; }
+#hud .wave::after { content: ''; position: fixed; inset: 0; background: radial-gradient(circle, rgba(220,245,255,.9), rgba(80,160,255,.35) 60%, transparent);
+  animation: waveFlash 1.4s ease-out forwards; }
+@keyframes waveOut { 0% { transform: scale(0) } 100% { transform: scale(320); opacity: 0 } }
+@keyframes waveFlash { 0% { opacity: 0 } 12% { opacity: 1 } 100% { opacity: 0 } }
+#hud .glitch .x { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -50%); font-size: 54px; letter-spacing: 8px; color: #fff;
   text-shadow: -4px 0 #ff2a5a, 4px 0 #2ad4ff; }
 @keyframes glitchBars { 0% { transform: translateY(0) } 33% { transform: translateY(-17px) } 66% { transform: translateY(23px) } }
 @keyframes glitchShake { 0% { transform: translate(3px, -2px) } 100% { transform: translate(-4px, 3px) } }
+/* interaction prompt + airstrike tablet */
+#hud .prompt { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); display: none; padding: 8px 16px; font-size: 20px; letter-spacing: 1.5px;
+  background: rgba(10,8,6,.7); border: 1px solid rgba(242,211,107,.5); color: #f2ecd8; text-align: center; }
+#hud .prompt i { display: block; height: 4px; margin-top: 6px; background: rgba(255,255,255,.15); }
+#hud .prompt i b { display: block; height: 100%; background: #f2d36b; }
+#hud .tablet { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: none; flex-direction: column; gap: 8px; padding: 16px 16px 12px;
+  background: linear-gradient(160deg, #2a2a26, #141412); border: 2px solid #4a4a42; border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.7), inset 0 0 0 6px #0a0a09; }
+#hud .tablet canvas { width: min(440px, 70vh); height: min(440px, 70vh); border-radius: 6px; image-rendering: pixelated; box-shadow: inset 0 0 30px rgba(0,0,0,.6); }
+#hud .tablet .tb-h { font-size: 20px; letter-spacing: 4px; color: #7dffb0; }
+#hud .tablet .tb-f { font-size: 13px; letter-spacing: 1.5px; color: #c8c2b0; }
 /* rank up */
 #hud .rankup { position: absolute; left: 50%; top: 38%; width: 0; height: 0; display: none; }
 #hud .rankup.show { display: block; }
@@ -225,6 +248,11 @@ export class Hud {
   private kstreak: HTMLDivElement;
   private earn: HTMLDivElement;
   private glitchEl: HTMLDivElement;
+  private waveEl!: HTMLDivElement;
+  private promptEl!: HTMLDivElement;
+  private tabletEl!: HTMLDivElement;
+  private tabletCtx!: CanvasRenderingContext2D;
+  private promptKey = '';
   private rankEl: HTMLDivElement;
   private whiteT = 0;
   private hitT = 0;
@@ -268,7 +296,11 @@ export class Hud {
     this.kstreak = el('div', 'kstreak', this.root);
     this.earn = el('div', 'earn', this.root);
     this.rankEl = el('div', 'rankup', this.root);
-    this.glitchEl = el('div', 'glitch', this.root, '<div>SYSTEM CRASH</div>');
+    this.glitchEl = el('div', 'glitch', this.root, '<div class="term"></div><div class="x">SYSTEM CRASH</div><div class="cnt"></div>');
+    this.waveEl = el('div', 'wave', this.root);
+    this.promptEl = el('div', 'prompt', this.root);
+    this.tabletEl = el('div', 'tablet', this.root, '<div class="tb-h">AIRSTRIKE · SELECT SWEEP</div><canvas width="440" height="440"></canvas><div class="tb-f">MOUSE AIM · WHEEL / R ROTATE · [F] CONFIRM · [4] CANCEL</div>');
+    this.tabletCtx = (this.tabletEl.querySelector('canvas') as HTMLCanvasElement).getContext('2d')!;
     this.dead = el('div', 'dead', this.root, '<div class="t">K.I.A.</div><div class="s"></div><div class="cls"></div>');
     this.tagLayer = el('div', 'tags', this.root);
     this.match = el('div', 'match', this.root);
@@ -392,8 +424,45 @@ export class Hud {
     this.earnT = 3.4;
   }
 
-  glitch(on: boolean) {
-    this.glitchEl.classList.toggle('on', on);
+  /** System Crash: 'hack' takes over the screen, 'count' shows 5..1, 'wave' fires the electric wave, null clears. */
+  crash(mode: 'hack' | 'count' | 'wave' | null, n = 0) {
+    const cnt = this.glitchEl.querySelector('.cnt') as HTMLElement;
+    if (mode === null) {
+      this.glitchEl.classList.remove('on');
+      this.waveEl.classList.remove('on');
+      return;
+    }
+    if (mode === 'hack') {
+      this.glitchEl.classList.add('on');
+      const lines = ['> root@deadpixel:~# inject --payload=crash.bin', '> bypassing match server ......... OK', '> overwriting enemy session keys .. OK', '> arming electromagnetic purge .... OK', '> T-MINUS'];
+      (this.glitchEl.querySelector('.term') as HTMLElement).textContent = lines.join('\n');
+      cnt.textContent = '';
+    } else if (mode === 'count') {
+      cnt.textContent = String(n);
+      cnt.classList.remove('tick');
+      void cnt.offsetWidth;
+      cnt.classList.add('tick');
+    } else {
+      cnt.textContent = '';
+      this.waveEl.classList.remove('on');
+      void this.waveEl.offsetWidth;
+      this.waveEl.classList.add('on');
+    }
+  }
+
+  /** Context prompt above the ammo counter, with an optional hold-progress bar. */
+  prompt(text: string | null, progress = -1) {
+    const key = text ? `${text}|${progress < 0 ? '' : Math.round(progress * 20)}` : '';
+    if (key === this.promptKey) return;
+    this.promptKey = key;
+    this.promptEl.style.display = text ? 'block' : 'none';
+    if (text) this.promptEl.innerHTML = `${text}${progress >= 0 ? `<i><b style="width:${Math.min(100, progress * 100)}%"></b></i>` : ''}`;
+  }
+
+  /** Airstrike tablet; `draw` paints the map each frame, null closes it. */
+  tablet(draw: ((ctx: CanvasRenderingContext2D, w: number) => void) | null) {
+    this.tabletEl.style.display = draw ? 'flex' : 'none';
+    if (draw) draw(this.tabletCtx, 440);
   }
 
   private rankQueue: [string, string, string, string][] = [];
@@ -419,7 +488,10 @@ export class Hud {
     this.earn.classList.remove('show');
     this.rankEl.classList.remove('show');
     this.glitchEl.classList.remove('on');
+    this.waveEl.classList.remove('on');
     this.kstreak.innerHTML = '';
+    this.prompt(null);
+    this.tablet(null);
   }
 
   damageFrom(angle: number) {

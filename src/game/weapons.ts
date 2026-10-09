@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Materials } from './materials';
 import type { Loadout, MagId, MuzzleId, OpticId, UnderId, WeaponId } from './loadout';
 import { group, mesh, rbox, type PlaceOpts } from './util';
-import { acogReticleTex, dotReticleTex, markingTex, reticleTex, weaponCamoTex, type CamoId } from './textures';
+import { acogReticleTex, dotReticleTex, markingTex, reticleTex } from './textures';
+import { camoMaterial, type CamoId } from './camos';
 
 /**
  * Procedural weapons, each 150-250 parts.
@@ -39,22 +40,6 @@ export function cfgFromLoadout(l: Loadout, slot: 'primary' | 'secondary' = 'prim
 const cyl = (rt: number, rb: number, h: number, seg = 32) => new THREE.CylinderGeometry(rt, rb, h, seg);
 const X90: [number, number, number] = [Math.PI / 2, 0, 0];
 const Z90: [number, number, number] = [0, 0, Math.PI / 2];
-
-const camoCache = new Map<CamoId, THREE.MeshStandardMaterial>();
-function camoMaterial(id: CamoId, base: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
-  if (id === 'none') return base;
-  let mat = camoCache.get(id);
-  if (!mat) {
-    mat = new THREE.MeshStandardMaterial({
-      map: weaponCamoTex(id),
-      roughnessMap: base.roughnessMap,
-      metalness: { gold: 1, prism: 0.85, obsidian: 0.6, neon: 0.3, magma: 0.4, void: 0.7, circuit: 0.5 }[id as string] ?? 0.35,
-      roughness: { gold: 0.3, prism: 0.22, obsidian: 0.16, neon: 0.35, magma: 0.5, void: 0.2, circuit: 0.4 }[id as string] ?? 0.55,
-    });
-    camoCache.set(id, mat);
-  }
-  return mat;
-}
 
 let holoRet: THREE.Texture | null = null;
 let dotRet: THREE.Texture | null = null;
