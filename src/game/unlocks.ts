@@ -1,4 +1,5 @@
-import { CAC_LEVEL, EXTRA_CLASS_LEVEL, PERKS1, PERKS2, PERKS3, SECONDARIES, TACTICALS, type Choice } from './loadout';
+import { CAC_LEVEL, EXTRA_CLASS_LEVEL, PERKS1, PERKS2, PERKS3, PRIMARY_IDS, SECONDARIES, TACTICALS, WEAPONS, WEAPON_CLASSES, type Choice } from './loadout';
+import { STREAKS } from './killstreaks';
 import { BANNERS, GEAR, UNIFORMS } from './cosmetics';
 import { MAX_LEVEL } from './progression';
 
@@ -10,7 +11,10 @@ export function unlockTrack(): Map<number, string[]> {
     track.set(level, [...(track.get(level) ?? []), label]);
   };
   const list = (items: Choice[], kind: string) => items.forEach((c) => add(c.level, `${kind}: ${c.name}`));
+  // weapons first: stronger guns sit later in the 1-75 track
+  PRIMARY_IDS.forEach((id) => add(WEAPONS[id].level, `${WEAPON_CLASSES[WEAPONS[id].cls].short}: ${WEAPONS[id].name}`));
   list(SECONDARIES, 'SIDEARM');
+  Object.values(STREAKS).forEach((k) => add(k.level, `KILLSTREAK: ${k.name}`));
   list(TACTICALS, 'TACTICAL');
   list([...PERKS1, ...PERKS2, ...PERKS3], 'PERK');
   list(UNIFORMS, 'UNIFORM');

@@ -31,7 +31,7 @@ const LOOKS: Record<Exclude<CamoId, 'none'>, CamoLook> = {
 };
 
 /** Every pack camo, in unlock order. */
-export const PACK_CAMOS: CamoId[] = ['grunt_grid', 'rubble', 'sand_tiger', 'frostbite', 'red_static', 'gold', 'prism', 'dead_signal'];
+export const PACK_CAMOS: CamoId[] = ['grunt_grid', 'rubble', 'sand_tiger', 'frostbite', 'red_static', 'gold', 'dead_signal', 'prism'];
 
 const tileCache = new Map<CamoId, THREE.Texture>();
 /** The static seamless tile for a camo (uniforms use this, animated camos included). */

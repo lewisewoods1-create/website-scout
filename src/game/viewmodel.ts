@@ -368,8 +368,9 @@ export class Viewmodel {
   /** `power` scales the visual kick to the gun (SMG ~0.7, rifle 1, sniper ~3). */
   fire(power = 1) {
     const adsK = lerp(1, 0.35, this.ads) * this.recoilMul * power;
-    this.kick += 0.028 * adsK;
-    this.kickPitch += (0.045 + Math.random() * 0.02) * adsK;
+    // capped so rapid semi-auto fire can't stack the gun out of frame
+    this.kick = Math.min(0.07, this.kick + 0.028 * adsK);
+    this.kickPitch = Math.min(0.16, this.kickPitch + (0.045 + Math.random() * 0.02) * adsK);
     this.kickYaw += (Math.random() - 0.5) * 0.03 * adsK;
     this.kickRoll += (Math.random() - 0.5) * 0.05 * adsK;
     this.flashTime = 0.045;
@@ -594,6 +595,8 @@ export class Gun {
   private reloadDur = 0;
   emptyReload = false;
   private lastTrigger = false;
+  /** a semi-auto pull made while the gun was still cycling, fired as soon as it can */
+  private queued = 0;
 
   constructor(stats: GunStats) {
     this.stats = stats;
@@ -617,6 +620,7 @@ export class Gun {
     this.reloading = -1;
     this.cool = 0;
     this.lastTrigger = false;
+    this.queued = 0;
   }
 
   /** Abandon a reload in progress (weapon switch, grenade throw). Rounds stay where they were. */
@@ -637,8 +641,9 @@ export class Gun {
   }
 
   /** Advance timers; returns how many rounds leave the barrel this frame. */
-  update(dt: number, trigger: boolean, canFire: boolean, busy = false): number {
+  update(dt: number, trigger: boolean, canFire: boolean, busy = false, clicks = 0): number {
     this.cool -= dt;
+    this.queued -= dt;
     if (this.reloading >= 0) {
       this.lastTrigger = trigger;
       if (busy) return 0;
@@ -652,12 +657,15 @@ export class Gun {
       return 0;
     }
     let shots = 0;
-    const pull = trigger && !this.lastTrigger;
+    const pull = (trigger && !this.lastTrigger) || clicks > 0;
     this.lastTrigger = trigger;
     if (!this.stats.auto) {
-      if (pull && canFire && this.cool <= 0 && this.ammo > 0) {
+      // fast clickers: a pull during the cycle time is buffered briefly instead of dropped
+      if (pull) this.queued = 0.22;
+      if (this.queued > 0 && canFire && this.cool <= 0 && this.ammo > 0) {
         this.cool = 60 / this.stats.rpm;
         this.ammo--;
+        this.queued = 0;
         shots = 1;
       }
     } else if (trigger && canFire) {

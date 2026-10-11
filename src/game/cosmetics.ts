@@ -103,8 +103,8 @@ export const UNIFORM_CAMOS: UniformCamo[] = (
     ['frostbite', 'streak5', 10, 'Get 5 kills in one life 10 times.'],
     ['red_static', 'streak_kills', 50, 'Get 50 kills with killstreaks.'],
     ['gold', 'best_match_kills', 30, 'Get 30 kills in one match.'],
-    ['prism', 'mvp', 15, 'Win a match as its top player 15 times.'],
-    ['dead_signal', 'crash_used', 3, 'Call in a System Crash 3 times.'],
+    ['dead_signal', 'mvp', 15, 'Win a match as its top player 15 times.'],
+    ['prism', 'crash_used', 3, 'Call in a System Crash 3 times.'],
   ] as [CamoId, string, number, string][]
 ).map(([id, stat, target, desc]) => ({ id, stat, target, desc, name: id.replace('_', ' ').toUpperCase(), swatch: camoSwatch(id) }));
 

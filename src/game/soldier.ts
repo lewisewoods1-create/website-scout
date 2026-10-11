@@ -43,20 +43,48 @@ function magPouch(parent: THREE.Object3D, m: Materials, kit: THREE.Material, x: 
   mesh(rbox(0.066, 0.0015, 0.0015, 0.0005), m.webbing, p, { pos: [0, -0.052, 0.0232] }); // stitch line
 }
 
-function arm(torso: THREE.Object3D, m: Materials, shoulder: THREE.Vector3, wrist: THREE.Vector3, pole: THREE.Vector3, sleeve: THREE.Material, kit: THREE.Material, patch: boolean) {
+interface ArmStyle {
+  sleeves: 'long' | 'rolled' | 'short';
+  skin: THREE.Material;
+  bulk: number;
+}
+
+function arm(torso: THREE.Object3D, m: Materials, shoulder: THREE.Vector3, wrist: THREE.Vector3, pole: THREE.Vector3, sleeve: THREE.Material, kit: THREE.Material, patch: boolean, st: ArmStyle) {
   const elbow = solveTwoBone(shoulder, wrist, 0.3, 0.28, pole, new THREE.Vector3());
-  orientLimb(mesh(limb(0.054, 0.046), sleeve, torso), shoulder, elbow);
-  orientLimb(mesh(limb(0.047, 0.037), sleeve, torso), elbow, wrist);
+  const k = st.bulk;
+  const lower = st.sleeves === 'long' ? sleeve : st.skin;
+  if (st.sleeves === 'short') {
+    // short sleeve: fabric over the top of the upper arm, bare skin below it
+    const cut = new THREE.Vector3().lerpVectors(shoulder, elbow, 0.5);
+    orientLimb(mesh(limb(0.06 * k, 0.056 * k), sleeve, torso), shoulder, cut);
+    orientLimb(mesh(limb(0.05 * k, 0.044 * k), st.skin, torso), cut, elbow);
+    const hem = mesh(cached('hem', () => new THREE.TorusGeometry(0.056, 0.008, 8, 24)), sleeve, torso, { pos: cut.toArray() as [number, number, number], scale: [k, k, k] });
+    hem.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), elbow.clone().sub(shoulder).normalize());
+  } else {
+    orientLimb(mesh(limb(0.054 * k, 0.046 * k), sleeve, torso), shoulder, elbow);
+  }
+  orientLimb(mesh(limb(0.047 * k, 0.037 * k), lower, torso), elbow, wrist);
+  if (st.sleeves === 'rolled') {
+    // sleeve rolled to just above the elbow
+    const roll = mesh(cached('roll', () => new THREE.TorusGeometry(0.05, 0.016, 10, 24)), sleeve, torso, { pos: new THREE.Vector3().lerpVectors(shoulder, elbow, 0.86).toArray() as [number, number, number], scale: [k, k, k] });
+    roll.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), elbow.clone().sub(shoulder).normalize());
+  }
   // muscle bulges so limbs aren't plain tubes
   const bulge = (a: THREE.Vector3, b: THREE.Vector3, t: number, r: number, len: number) => {
     const s = mesh(sphere(1), sleeve, torso, { pos: new THREE.Vector3().lerpVectors(a, b, t).toArray() as [number, number, number] });
     s.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
     s.scale.set(r, len, r);
   };
-  bulge(shoulder, elbow, 0.45, 0.058, 0.11);
-  bulge(elbow, wrist, 0.3, 0.05, 0.09);
-  mesh(sphere(0.06), sleeve, torso, { pos: shoulder.toArray() as [number, number, number], scale: [1, 0.9, 1.1] });
-  mesh(sphere(0.047), sleeve, torso, { pos: elbow.toArray() as [number, number, number] });
+  bulge(shoulder, elbow, 0.45, 0.058 * k, 0.11);
+  bulge(elbow, wrist, 0.3, 0.05 * k, 0.09);
+  mesh(sphere(0.06), sleeve, torso, { pos: shoulder.toArray() as [number, number, number], scale: [k, 0.9 * k, 1.1 * k] });
+  mesh(sphere(0.047), st.sleeves === 'long' ? sleeve : st.skin, torso, { pos: elbow.toArray() as [number, number, number], scale: [k, k, k] });
+  if (st.sleeves !== 'long') {
+    // a watch on the bare wrist
+    const w = mesh(cached('watch', () => new THREE.TorusGeometry(0.036, 0.008, 8, 24)), m.polymer, torso, { pos: new THREE.Vector3().lerpVectors(elbow, wrist, 0.86).toArray() as [number, number, number] });
+    w.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3().subVectors(wrist, elbow).normalize());
+    return;
+  }
   const out = new THREE.Vector3().addVectors(shoulder, wrist).multiplyScalar(0.5).sub(elbow).negate().normalize();
   const pad = mesh(rbox(0.07, 0.08, 0.035, 0.014, 4), m.polymer, torso, { pos: elbow.clone().addScaledVector(out, 0.035).toArray() as [number, number, number] });
   pad.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), out);
@@ -109,13 +137,25 @@ function lookMats(m: Materials, look: SoldierLook) {
   return { uniform, kit };
 }
 
-/** Face, eyewear and headgear for an operator. Head pivot origin sits at the base of the skull. */
-function buildHead(head: THREE.Object3D, m: Materials, op: Operator, uniform: THREE.Material, kit: THREE.Material) {
-  const skin = cachedMat(`skin:${op.skin}:${m.skin.uuid}`, () => {
+const skinMat = (m: Materials, op: Operator) =>
+  cachedMat(`skin:${op.skin}:${m.skin.uuid}`, () => {
     const s = m.skin.clone();
     s.color.setHex(op.skin);
     return s;
   });
+
+/** Plain shirt fabric (polo / tee) in a solid colour. */
+const shirtMat = (m: Materials, color: number) =>
+  cachedMat(`shirt:${color}:${m.webbing.uuid}`, () => {
+    const s = m.webbing.clone() as THREE.MeshStandardMaterial;
+    s.color.setHex(color);
+    s.roughness = 0.9;
+    return s;
+  });
+
+/** Face, eyewear and headgear for an operator. Head pivot origin sits at the base of the skull. */
+function buildHead(head: THREE.Object3D, m: Materials, op: Operator, uniform: THREE.Material, kit: THREE.Material) {
+  const skin = skinMat(m, op);
   const hair = cachedMat(`hair:${op.hair}`, () => new THREE.MeshStandardMaterial({ color: op.hair, roughness: 1 }));
   const covered = op.face === 'balaclava' || op.face === 'gasmask';
   // skull and jaw: knit balaclava / hood fabric, or skin
@@ -233,14 +273,26 @@ export function buildSoldier(m: Materials, look: SoldierLook, weapon: WeaponCfg 
   // ---------------------------------------------------------------- pelvis + belt
   const hips = group(root, { pos: [0, 0.99, 0], name: 'hips' });
   mesh(lathe('pelvis', [[0.0, -0.13], [0.11, -0.12], [0.155, -0.07], [0.17, 0.0], [0.168, 0.08], [0.16, 0.12]]), uniform, hips, { scale: [1, 1, 0.72] });
-  mesh(rbox(0.36, 0.06, 0.26, 0.025, 4), kit, hips, { pos: [0, 0.085, 0] }); // battle belt
-  mesh(rbox(0.37, 0.012, 0.265, 0.004), m.webbing, hips, { pos: [0, 0.105, 0] }); // inner belt edge
-  mesh(rbox(0.052, 0.036, 0.012, 0.005), m.parkerized, hips, { pos: [0, 0.085, 0.132] }); // buckle
-  for (const [x, z] of [[0.17, 0.06], [-0.17, 0.06], [0.18, -0.05], [-0.15, -0.1], [0.05, -0.13]] as const) {
-    const p = mesh(rbox(0.07, 0.09, 0.05, 0.014, 4), kit, hips, { pos: [x, 0.05, z], rot: [0, Math.atan2(x, z), 0] });
-    mesh(rbox(0.074, 0.026, 0.054, 0.01, 4), kit, p, { pos: [0, 0.04, 0] });
+  const armoured = op.rig === 'plate' || op.rig === 'heavy';
+  if (armoured) {
+    mesh(rbox(0.36, 0.06, 0.26, 0.025, 4), kit, hips, { pos: [0, 0.085, 0] }); // battle belt
+    mesh(rbox(0.37, 0.012, 0.265, 0.004), m.webbing, hips, { pos: [0, 0.105, 0] }); // inner belt edge
+    for (const [x, z] of [[0.17, 0.06], [-0.17, 0.06], [0.18, -0.05], [-0.15, -0.1], [0.05, -0.13]] as const) {
+      const p = mesh(rbox(0.07, 0.09, 0.05, 0.014, 4), kit, hips, { pos: [x, 0.05, z], rot: [0, Math.atan2(x, z), 0] });
+      mesh(rbox(0.074, 0.026, 0.054, 0.01, 4), kit, p, { pos: [0, 0.04, 0] });
+    }
+    mesh(rbox(0.12, 0.1, 0.05, 0.025, 4), m.webbing, hips, { pos: [-0.08, -0.02, -0.13] }); // dump pouch
+  } else {
+    // slim trouser belt with a couple of pouches
+    mesh(rbox(0.35, 0.035, 0.25, 0.012, 4), op.rig === 'suit' ? m.rubber : m.webbing, hips, { pos: [0, 0.09, 0] });
+    for (const x of [0.16, -0.16]) mesh(rbox(0.06, 0.08, 0.045, 0.012, 4), kit, hips, { pos: [x, 0.06, 0.04], rot: [0, Math.atan2(x, 0.1), 0] });
+    if (op.rig === 'suit') {
+      // respirator canister bag on the hip
+      mesh(rbox(0.11, 0.14, 0.07, 0.02, 4), kit, hips, { pos: [0.18, -0.02, -0.06] });
+      mesh(cached('canister', () => new THREE.CylinderGeometry(0.035, 0.035, 0.08, 20)), m.parkerized, hips, { pos: [0.18, 0.07, -0.06] });
+    }
   }
-  mesh(rbox(0.12, 0.1, 0.05, 0.025, 4), m.webbing, hips, { pos: [-0.08, -0.02, -0.13] }); // dump pouch
+  mesh(rbox(0.052, 0.036, 0.012, 0.005), m.parkerized, hips, { pos: [0, 0.085, 0.132] }); // buckle
   // trouser seam folds at the crotch
   mesh(rbox(0.004, 0.08, 0.2, 0.002), m.webbing, hips, { pos: [0, -0.09, 0], scale: [1, 1, 0.7] });
 
@@ -253,7 +305,7 @@ export function buildSoldier(m: Materials, look: SoldierLook, weapon: WeaponCfg 
     const cp = group(thigh, { pos: [s * 0.075, -0.2, 0.01], rot: [0, s * 0.35, 0] });
     mesh(rbox(0.035, 0.13, 0.12, 0.012, 4), uniform, cp);
     mesh(rbox(0.04, 0.03, 0.125, 0.01, 4), uniform, cp, { pos: [0.002, 0.06, 0] });
-    if (s === -1) {
+    if (s === -1 && op.rig !== 'chest' && op.rig !== 'suit') {
       const hol = group(thigh, { pos: [-0.1, -0.16, 0.0] });
       mesh(rbox(0.04, 0.17, 0.09, 0.016, 4), m.polymer, hol, {});
       mesh(rbox(0.045, 0.04, 0.11, 0.01, 4), m.polymer, hol, { pos: [0, 0.07, 0] });
@@ -262,19 +314,24 @@ export function buildSoldier(m: Materials, look: SoldierLook, weapon: WeaponCfg 
     }
     const knee = group(thigh, { pos: [0, -0.43, 0], name: `knee${side}` });
     mesh(sphere(0.066), uniform, knee, {});
-    const kp = group(knee, { pos: [0, 0.0, 0.062] });
-    mesh(rbox(0.11, 0.13, 0.04, 0.02, 4), m.polymer, kp, {});
-    mesh(rbox(0.09, 0.05, 0.012, 0.005), m.rubber, kp, { pos: [0, 0.0, 0.02] });
-    for (const y of [0.045, -0.05]) mesh(cached(`kstrap${y}`, () => new THREE.TorusGeometry(0.072, 0.007, 6, 32)), m.webbing, knee, { pos: [0, y, -0.005], rot: [Math.PI / 2, 0, 0] });
+    if (armoured) {
+      const kp = group(knee, { pos: [0, 0.0, 0.062] });
+      mesh(rbox(op.heavy ? 0.13 : 0.11, op.heavy ? 0.16 : 0.13, 0.04, 0.02, 4), m.polymer, kp, {});
+      mesh(rbox(0.09, 0.05, 0.012, 0.005), m.rubber, kp, { pos: [0, 0.0, 0.02] });
+      for (const y of [0.045, -0.05]) mesh(cached(`kstrap${y}`, () => new THREE.TorusGeometry(0.072, 0.007, 6, 32)), m.webbing, knee, { pos: [0, y, -0.005], rot: [Math.PI / 2, 0, 0] });
+    } else if (op.rig === 'suit') {
+      mesh(cached('tape', () => new THREE.TorusGeometry(0.07, 0.01, 6, 32)), m.rubber, knee, { pos: [0, -0.3, -0.006], rot: [Math.PI / 2, 0, 0] }); // taped cuff
+    }
     mesh(lathe('calf', [[0.0, -0.4], [0.05, -0.39], [0.054, -0.33], [0.068, -0.17], [0.066, -0.06], [0.06, 0.0], [0.0, 0.02]]), uniform, knee, { pos: [0, -0.01, -0.006] });
     // boot: shaft, rounded toe, heel, sole with lugs, laces
     const ankle = group(knee, { pos: [0, -0.42, 0] });
-    mesh(lathe('bootshaft', [[0.0, -0.08], [0.064, -0.08], [0.066, 0.0], [0.07, 0.08], [0.0, 0.085]]), m.boot, ankle);
-    mesh(rbox(0.11, 0.09, 0.2, 0.04, 5), m.boot, ankle, { pos: [0, -0.06, 0.03] });
-    mesh(sphere(1), m.boot, ankle, { pos: [0, -0.07, 0.125], scale: [0.058, 0.048, 0.07] }); // toe box
+    const boot = op.boots === 'rubber' ? m.rubber : op.boots === 'desert' ? m.coyote : m.boot;
+    mesh(lathe('bootshaft', [[0.0, -0.08], [0.064, -0.08], [0.066, 0.0], [0.07, 0.08], [0.0, 0.085]]), boot, ankle, op.boots === 'rubber' ? { scale: [1.08, 1.9, 1.08], pos: [0, 0.07, 0] } : {});
+    mesh(rbox(0.11, 0.09, 0.2, 0.04, 5), boot, ankle, { pos: [0, -0.06, 0.03] });
+    mesh(sphere(1), boot, ankle, { pos: [0, -0.07, 0.125], scale: [0.058, 0.048, 0.07] }); // toe box
     mesh(rbox(0.122, 0.03, 0.29, 0.012, 3), m.sole, ankle, { pos: [0, -0.112, 0.045] });
     for (let i = 0; i < 7; i++) mesh(rbox(0.124, 0.007, 0.014, 0.003), m.rubber, ankle, { pos: [0, -0.127, -0.08 + i * 0.042] });
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < (op.boots === 'rubber' ? 0 : 6); i++) {
       mesh(rbox(0.05, 0.004, 0.006, 0.002), m.sole, ankle, { pos: [0, 0.06 - i * 0.026, 0.066 - i * 0.003], rot: [0.3, 0, 0] });
       for (const e of [-1, 1]) mesh(sphere(0.004), m.parkerized, ankle, { pos: [e * 0.026, 0.06 - i * 0.026, 0.064 - i * 0.003] }); // eyelets
     }
@@ -282,32 +339,93 @@ export function buildSoldier(m: Materials, look: SoldierLook, weapon: WeaponCfg 
 
   // ---------------------------------------------------------------- torso
   const torso = group(hips, { pos: [0, 0.1, 0], name: 'torso' });
-  mesh(lathe('torso', [[0.0, -0.02], [0.15, 0.0], [0.16, 0.06], [0.166, 0.15], [0.178, 0.28], [0.188, 0.38], [0.182, 0.46], [0.145, 0.52], [0.075, 0.555], [0.0, 0.56]]), uniform, torso, { scale: [op.bulk, 1, 0.64 * op.bulk] });
-  // plate carrier: rounded plates, cummerbund, shoulder pads, stitching
-  const plateF = group(torso, { pos: [0, 0.3, 0.122 * op.bulk], scale: [op.bulk, 1, 1] });
-  mesh(rbox(0.3, 0.34, 0.055, 0.022, 5), kit, plateF, {});
-  mesh(rbox(0.29, 0.0015, 0.0015, 0.0005), m.webbing, plateF, { pos: [0, 0.165, 0.028] });
-  molle(plateF, m, kit, 0, 0.09, 0.028, 0.26, 2, 1);
-  for (let i = 0; i < 3; i++) magPouch(plateF, m, kit, -0.085 + i * 0.085, -0.09, 0.05);
-  mesh(rbox(0.16, 0.08, 0.025, 0.01, 4), kit, plateF, { pos: [0, 0.03, 0.035] }); // admin
-  mesh(rbox(0.07, 0.045, 0.004, 0.002), m.webbing, plateF, { pos: [0.045, 0.04, 0.049] }); // ID patch
-  mesh(cached('tq', () => new THREE.CylinderGeometry(0.016, 0.016, 0.09, 20)), m.rubber, plateF, { pos: [-0.06, 0.035, 0.05], rot: [0, 0, Math.PI / 2] });
-  const plateB = group(torso, { pos: [0, 0.3, -0.122 * op.bulk], scale: [op.bulk, 1, 1] });
-  mesh(rbox(0.3, 0.36, 0.055, 0.022, 5), kit, plateB, {});
-  molle(plateB, m, kit, 0, 0.12, -0.028, 0.26, 6, -1);
-  const radio = group(plateB, { pos: [0.08, 0.02, -0.06] });
-  mesh(rbox(0.07, 0.15, 0.045, 0.012, 4), kit, radio, {});
-  mesh(rbox(0.05, 0.11, 0.035, 0.006, 4), m.polymer, radio, { pos: [0, 0.07, 0] });
-  mesh(cached('ant', () => new THREE.CylinderGeometry(0.004, 0.0035, 0.32, 10)), m.rubber, radio, { pos: [0.015, 0.28, 0] });
-  mesh(cached('antb', () => new THREE.CylinderGeometry(0.008, 0.008, 0.02, 16)), m.parkerized, radio, { pos: [0.015, 0.13, 0] });
-  mesh(rbox(0.12, 0.22, 0.04, 0.025, 5), kit, plateB, { pos: [-0.05, -0.02, -0.05] }); // hydration
-  for (const s of [-1, 1]) {
-    mesh(rbox(0.05, 0.18, 0.23, 0.02, 4), kit, torso, { pos: [s * 0.172, 0.22, 0] });
-    mesh(rbox(0.08, 0.035, 0.27, 0.014, 4), kit, torso, { pos: [s * 0.1, 0.49, 0] });
-    mesh(rbox(0.06, 0.06, 0.012, 0.005), m.webbing, torso, { pos: [s * 0.1, 0.455, 0.14] });
+  const top = op.shirt ? shirtMat(m, op.shirt) : uniform;
+  const B = op.bulk;
+  mesh(lathe('torso', [[0.0, -0.02], [0.15, 0.0], [0.16, 0.06], [0.166, 0.15], [0.178, 0.28], [0.188, 0.38], [0.182, 0.46], [0.145, 0.52], [0.075, 0.555], [0.0, 0.56]]), top, torso, { scale: [B, 1, 0.64 * B] });
+  if (op.rig === 'plate' || op.rig === 'heavy') {
+    const H = op.rig === 'heavy';
+    // plate carrier: rounded plates, cummerbund, shoulder pads, stitching (the breacher's is bigger and thicker)
+    const plateF = group(torso, { pos: [0, 0.3, (H ? 0.13 : 0.122) * B], scale: [B, 1, 1] });
+    mesh(rbox(H ? 0.33 : 0.3, H ? 0.38 : 0.34, H ? 0.075 : 0.055, 0.022, 5), kit, plateF, {});
+    mesh(rbox(0.29, 0.0015, 0.0015, 0.0005), m.webbing, plateF, { pos: [0, 0.165, 0.028] });
+    molle(plateF, m, kit, 0, 0.09, 0.028, 0.26, 2, 1);
+    for (let i = 0; i < 3; i++) magPouch(plateF, m, kit, -0.085 + i * 0.085, -0.09, H ? 0.06 : 0.05);
+    if (H) {
+      // shotgun-shell bandolier across the chest and a big BREACH panel
+      for (let i = 0; i < 9; i++) mesh(cached('shell12', () => new THREE.CylinderGeometry(0.009, 0.009, 0.035, 10)), i % 3 ? cachedMat('shell12', () => new THREE.MeshStandardMaterial({ color: 0x8a1c14, roughness: 0.5 })) : m.brass, plateF, { pos: [-0.12 + i * 0.03, 0.06, 0.045] });
+      mesh(rbox(0.28, 0.025, 0.02, 0.006), m.webbing, plateF, { pos: [0, 0.06, 0.04] });
+    } else {
+      mesh(rbox(0.16, 0.08, 0.025, 0.01, 4), kit, plateF, { pos: [0, 0.03, 0.035] }); // admin
+      mesh(rbox(0.07, 0.045, 0.004, 0.002), m.webbing, plateF, { pos: [0.045, 0.04, 0.049] }); // ID patch
+      mesh(cached('tq', () => new THREE.CylinderGeometry(0.016, 0.016, 0.09, 20)), m.rubber, plateF, { pos: [-0.06, 0.035, 0.05], rot: [0, 0, Math.PI / 2] });
+    }
+    const plateB = group(torso, { pos: [0, 0.3, -(H ? 0.13 : 0.122) * B], scale: [B, 1, 1] });
+    mesh(rbox(H ? 0.33 : 0.3, H ? 0.38 : 0.36, H ? 0.075 : 0.055, 0.022, 5), kit, plateB, {});
+    molle(plateB, m, kit, 0, 0.12, -0.028, 0.26, 6, -1);
+    if (H) {
+      // ballistic shield slung on the back with its viewport
+      const sh = group(plateB, { pos: [0, -0.05, -0.08], rot: [0.05, 0, 0] });
+      mesh(rbox(0.44, 0.7, 0.03, 0.03, 4), m.polymer, sh, {});
+      mesh(rbox(0.18, 0.05, 0.034, 0.008), m.visor, sh, { pos: [0, 0.22, 0] });
+      mesh(rbox(0.3, 0.06, 0.032, 0.006), m.helmet, sh, { pos: [0, -0.1, 0] });
+    } else {
+      const radio = group(plateB, { pos: [0.08, 0.02, -0.06] });
+      mesh(rbox(0.07, 0.15, 0.045, 0.012, 4), kit, radio, {});
+      mesh(rbox(0.05, 0.11, 0.035, 0.006, 4), m.polymer, radio, { pos: [0, 0.07, 0] });
+      mesh(cached('ant', () => new THREE.CylinderGeometry(0.004, 0.0035, 0.32, 10)), m.rubber, radio, { pos: [0.015, 0.28, 0] });
+      mesh(cached('antb', () => new THREE.CylinderGeometry(0.008, 0.008, 0.02, 16)), m.parkerized, radio, { pos: [0.015, 0.13, 0] });
+      mesh(rbox(0.12, 0.22, 0.04, 0.025, 5), kit, plateB, { pos: [-0.05, -0.02, -0.05] }); // hydration
+    }
+    for (const s of [-1, 1]) {
+      mesh(rbox(H ? 0.07 : 0.05, 0.18, 0.23, 0.02, 4), kit, torso, { pos: [s * 0.172 * B, 0.22, 0] });
+      mesh(rbox(0.08, 0.035, 0.27, 0.014, 4), kit, torso, { pos: [s * 0.1, 0.49, 0] });
+      mesh(rbox(0.06, 0.06, 0.012, 0.005), m.webbing, torso, { pos: [s * 0.1, 0.455, 0.14] });
+    }
+  } else if (op.rig === 'chest') {
+    // scout: chest rig of rifle mags on an X harness, rucksack with a bedroll, scarf over the shoulders
+    const rig = group(torso, { pos: [0, 0.24, 0.11 * B] });
+    mesh(rbox(0.3, 0.15, 0.05, 0.02, 4), kit, rig, {});
+    for (let i = 0; i < 4; i++) magPouch(rig, m, kit, -0.11 + i * 0.073, 0.02, 0.035);
+    for (const s of [-1, 1]) {
+      const strap = mesh(rbox(0.04, 0.42, 0.012, 0.004), m.webbing, torso, { pos: [s * 0.08, 0.38, -0.11 * B], rot: [0, 0, s * 0.42] });
+      strap.scale.set(1, 1, 1);
+      mesh(rbox(0.045, 0.28, 0.012, 0.004), m.webbing, torso, { pos: [s * 0.09, 0.4, 0.12 * B], rot: [-0.15, 0, 0] });
+    }
+    const ruck = group(torso, { pos: [0, 0.3, -0.2 * B] });
+    mesh(rbox(0.3, 0.38, 0.17, 0.05, 5), kit, ruck, {});
+    mesh(rbox(0.24, 0.14, 0.06, 0.03, 4), kit, ruck, { pos: [0, -0.08, -0.1] });
+    mesh(cached('bedroll', () => new THREE.CylinderGeometry(0.06, 0.06, 0.36, 20)), m.ranger, ruck, { pos: [0, 0.24, 0], rot: [0, 0, Math.PI / 2] });
+    for (const x of [-0.1, 0.1]) mesh(cached('rollstrap', () => new THREE.TorusGeometry(0.064, 0.006, 6, 20)), m.webbing, ruck, { pos: [x, 0.24, 0], rot: [0, Math.PI / 2, 0] });
+    mesh(rbox(0.34, 0.06, 0.24, 0.03, 4), m.coyote, torso, { pos: [0, 0.5, 0], rot: [0, 0, 0] }); // scarf draped over the shoulders
+  } else if (op.rig === 'suit') {
+    // CBRN: taped suit seams, a slim harness and an air tank with a hose to the mask
+    for (const y of [0.05, 0.3]) mesh(cached(`seam${y}`, () => new THREE.TorusGeometry(0.17, 0.008, 6, 40)), m.rubber, torso, { pos: [0, y, 0], rot: [Math.PI / 2, 0, 0], scale: [B, 0.66 * B, 1] });
+    for (const s of [-1, 1]) mesh(rbox(0.035, 0.46, 0.012, 0.004), m.webbing, torso, { pos: [s * 0.09, 0.3, 0.123 * B] });
+    mesh(rbox(0.22, 0.03, 0.012, 0.004), m.webbing, torso, { pos: [0, 0.24, 0.124 * B] });
+    mesh(rbox(0.12, 0.1, 0.05, 0.015, 4), kit, torso, { pos: [0, 0.32, 0.13 * B] }); // radio / dosimeter
+    mesh(rbox(0.04, 0.05, 0.02, 0.005), m.laserRed, torso, { pos: [0.04, 0.34, 0.16 * B] });
+    const tank = group(torso, { pos: [0, 0.3, -0.18 * B] });
+    mesh(cached('tank', () => new THREE.CylinderGeometry(0.075, 0.075, 0.5, 28)), m.brass, tank, {});
+    mesh(sphere(0.075), m.brass, tank, { pos: [0, 0.25, 0] });
+    mesh(cached('valve', () => new THREE.CylinderGeometry(0.02, 0.02, 0.06, 16)), m.steel, tank, { pos: [0, 0.33, 0] });
+    mesh(rbox(0.26, 0.42, 0.04, 0.02, 4), m.polymer, torso, { pos: [0, 0.3, -0.13 * B] }); // backplate
+    const hose = mesh(cached('hose', () => new THREE.CylinderGeometry(0.014, 0.014, 1, 12)), m.rubber, torso);
+    orientLimb(hose, new THREE.Vector3(0.05, 0.63, -0.18 * B), new THREE.Vector3(0.09, 0.62, 0.12));
+  } else {
+    // contractor: slick low-profile carrier over a polo, two mags, sling bag across the back
+    const plateF = group(torso, { pos: [0, 0.31, 0.118 * B] });
+    mesh(rbox(0.28, 0.3, 0.032, 0.016, 4), kit, plateF, {});
+    for (let i = 0; i < 2; i++) mesh(rbox(0.07, 0.1, 0.03, 0.01, 4), kit, plateF, { pos: [-0.04 + i * 0.08, -0.08, 0.028] });
+    const plateB = group(torso, { pos: [0, 0.31, -0.118 * B] });
+    mesh(rbox(0.28, 0.3, 0.032, 0.016, 4), kit, plateB, {});
+    for (const s of [-1, 1]) mesh(rbox(0.06, 0.025, 0.25, 0.01, 4), kit, torso, { pos: [s * 0.1, 0.49, 0] });
+    mesh(rbox(0.07, 0.06, 0.18, 0.012, 4), top, torso, { pos: [0, 0.52, 0.05] }); // polo collar
+    const strap = mesh(rbox(0.04, 0.62, 0.012, 0.004), m.webbing, torso, { pos: [0, 0.3, -0.14 * B], rot: [0, 0, 0.75] });
+    strap.scale.set(1, 1, 1);
+    mesh(rbox(0.2, 0.16, 0.08, 0.035, 5), m.gearBlack, torso, { pos: [0.12, 0.12, -0.16 * B] });
   }
-  mesh(cached('neck', () => new THREE.CylinderGeometry(0.05, 0.058, 0.1, 28)), m.webbing, torso, { pos: [0, 0.55, 0] });
-  mesh(cached('shemagh', () => new THREE.TorusGeometry(0.07, 0.03, 14, 32)), m.ranger, torso, { pos: [0, 0.525, 0], rot: [Math.PI / 2, 0, 0] });
+  mesh(cached('neck', () => new THREE.CylinderGeometry(0.05, 0.058, 0.1, 28)), op.rig === 'lowpro' ? skinMat(m, op) : m.webbing, torso, { pos: [0, 0.55, 0] });
+  if (op.rig === 'plate' || op.rig === 'heavy') mesh(cached('shemagh', () => new THREE.TorusGeometry(0.07, 0.03, 14, 32)), m.ranger, torso, { pos: [0, 0.525, 0], rot: [Math.PI / 2, 0, 0] });
 
   // ---------------------------------------------------------------- head: face, eyewear, headgear (per operator)
   const head = group(torso, { pos: [0, 0.6, 0.0], name: 'head' });
@@ -337,8 +455,9 @@ export function buildSoldier(m: Materials, look: SoldierLook, weapon: WeaponCfg 
     const inv = new THREE.Matrix4().copy(torso.matrixWorld).invert();
     const wristR = hands.right.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
     const wristL = hands.left.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-    arm(torso, m, shoulderR, wristR, new THREE.Vector3(-0.5, 0.0, -0.1), uniform, kit, true);
-    arm(torso, m, shoulderL, wristL, new THREE.Vector3(0.45, 0.1, 0.1), uniform, kit, false);
+    const st: ArmStyle = { sleeves: op.sleeves, skin: skinMat(m, op), bulk: op.heavy ? 1.12 : op.bulk };
+    arm(torso, m, shoulderR, wristR, new THREE.Vector3(-0.5, 0.0, -0.1), top, kit, op.rig !== 'lowpro', st);
+    arm(torso, m, shoulderL, wristL, new THREE.Vector3(0.45, 0.1, 0.1), top, kit, false, st);
   }
 
   root.scale.setScalar(op.height);

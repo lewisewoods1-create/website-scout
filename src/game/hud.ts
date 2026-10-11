@@ -24,14 +24,35 @@ const CSS = `
 #hud .hit.head { width: 34px; height: 34px; margin: -17px; }
 #hud .hit.head::before, #hud .hit.head::after { left: 16px; height: 38px; background: linear-gradient(#ffd23a 0 35%, transparent 35% 65%, #ffd23a 65%); }
 #hud .hit.kill::before, #hud .hit.kill::after { background: linear-gradient(#ff3b2a 0 35%, transparent 35% 65%, #ff3b2a 65%); }
-#hud .ammo { position: absolute; right: 36px; bottom: 28px; text-align: right; }
-#hud .ammo .n { font-size: 52px; line-height: .8; }
-#hud .ammo .n small { font-size: 25px; opacity: .7; }
-#hud .ammo .w { font-size: 18px; letter-spacing: 2px; opacity: .85; }
-#hud .ammo .bullets { display: flex; gap: 2px; justify-content: flex-end; margin-top: 6px; }
-#hud .ammo .bullets b { width: 3px; height: 12px; background: #d8c48a; }
-#hud .ammo .bullets b.spent { background: rgba(255,255,255,.12); }
-#hud .ammo .low { color: #ff5a3a; font-size: 18px; }
+#hud .wpanel { position: absolute; right: 28px; bottom: 24px; width: 340px; padding: 14px 18px 14px 40px; text-align: right;
+  background: linear-gradient(90deg, rgba(8,7,8,0), rgba(8,7,8,.62) 28%); border-right: 3px solid #f2d36b; }
+#hud .wpanel .wh { display: flex; justify-content: flex-end; align-items: baseline; gap: 10px; }
+#hud .wpanel .w { font-size: 24px; letter-spacing: 2px; font-weight: 700; }
+#hud .wpanel .mode { font-size: 12px; letter-spacing: 2px; padding: 1px 6px; border: 1px solid rgba(236,230,212,.45); opacity: .85; }
+#hud .wpanel .n { font-size: 86px; line-height: .86; font-weight: 800; letter-spacing: -1px; transition: color .15s; }
+#hud .wpanel .n small { font-size: 32px; opacity: .6; font-weight: 600; letter-spacing: 0; }
+#hud .wpanel .n.low { color: #ff5a3a; }
+#hud .wpanel .bullets { display: flex; gap: 2px; justify-content: flex-end; margin-top: 8px; height: 14px; }
+#hud .wpanel .bullets b { flex: 0 0 4px; height: 14px; background: #e9d79a; border-radius: 1px; }
+#hud .wpanel .bullets b.spent { background: rgba(255,255,255,.13); }
+#hud .wpanel .bullets.belt { display: block; position: relative; background: rgba(255,255,255,.13); height: 8px; margin-top: 10px; }
+#hud .wpanel .bullets.belt i { position: absolute; right: 0; top: 0; bottom: 0; background: #e9d79a; }
+#hud .wpanel .rl { height: 4px; margin-top: 6px; background: rgba(255,255,255,.12); visibility: hidden; }
+#hud .wpanel .rl i { display: block; height: 100%; width: 0; background: #7ec8ff; margin-left: auto; }
+#hud .wpanel .rl.on { visibility: visible; }
+#hud .wpanel .alt { font-size: 15px; letter-spacing: 1.5px; opacity: .55; margin-top: 8px; }
+#hud .wpanel .alt b { opacity: 1; color: #f2d36b; font-weight: 700; }
+#hud .equip { display: flex; justify-content: flex-end; gap: 16px; margin-top: 8px; font-size: 15px; letter-spacing: 1px; }
+#hud .equip span { display: inline-flex; align-items: center; gap: 6px; }
+#hud .equip svg { width: 20px; height: 20px; }
+#hud .equip span b { color: #f2d36b; font-size: 20px; }
+#hud .equip span.empty { opacity: .3; }
+#hud .hp { position: absolute; left: 28px; bottom: 28px; width: 260px; }
+#hud .hp .hn { font-size: 34px; font-weight: 800; line-height: 1; }
+#hud .hp .hn small { font-size: 14px; letter-spacing: 3px; opacity: .6; margin-left: 6px; }
+#hud .hp .hb { height: 8px; margin-top: 4px; background: rgba(255,255,255,.14); }
+#hud .hp .hb i { display: block; height: 100%; background: #e9e3cf; transition: width .12s; }
+#hud .hp.low .hb i { background: #ff5a3a; } #hud .hp.low .hn { color: #ff5a3a; }
 #hud .rank { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: min(520px, 60vw); text-align: center; font-size: 15px; }
 #hud .rank .bar { height: 5px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.25); margin-top: 3px; }
 #hud .rank .bar i { display: block; height: 100%; background: #e0b23c; width: 0; transition: width .4s; }
@@ -47,7 +68,7 @@ const CSS = `
 #hud .banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .3s; }
 #hud .banner .t { font-size: 36px; color: #f2d36b; letter-spacing: 3px; }
 #hud .banner .s { font-size: 18px; }
-#hud .streak { position: absolute; right: 36px; bottom: 150px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#hud .streak { position: absolute; right: 36px; bottom: 272px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #hud .sk-row { display: flex; gap: 6px; }
 #hud .sk { position: relative; width: 46px; height: 46px; border: 1px solid rgba(236,230,212,.3); background: rgba(0,0,0,.45); display: grid; place-items: center;
   color: rgba(236,230,212,.45); overflow: hidden; }
@@ -126,6 +147,13 @@ const CSS = `
 #hud .rankup .k { font-size: 18px; letter-spacing: 8px; color: #9fd36b; }
 #hud .rankup .l { font-size: 56px; letter-spacing: 3px; color: #f2d36b; line-height: 1; text-shadow: 0 0 24px rgba(242,211,107,.6), 0 3px 6px #000; }
 #hud .rankup .r { font-size: 22px; letter-spacing: 3px; }
+#hud .rankup.minor { top: 30%; }
+#hud .rankup.minor .rays { scale: .62; }
+#hud .rankup.minor .l { font-size: 40px; }
+#hud .rankup.minor .k { color: #7ec8ff; }
+#hud .rankup .unl { width: 128px; height: 128px; display: grid; place-items: center; }
+#hud .rankup .unl svg { width: 112px; height: 112px; filter: drop-shadow(0 0 14px rgba(126,200,255,.55)); }
+#hud .rankup .unl .disc { width: 104px; height: 104px; border-radius: 50%; border: 3px solid #f2d36b; box-shadow: 0 0 24px rgba(242,211,107,.6), inset 0 0 18px rgba(0,0,0,.5); }
 #hud .rankup .u { font-size: 15px; letter-spacing: 1px; color: #ece6d4; opacity: .85; margin-top: 6px; }
 @keyframes raysSpin { to { transform: rotate(360deg) } }
 @keyframes raysIn { 0% { opacity: 0; scale: .3 } 15% { opacity: 1; scale: 1 } 82% { opacity: 1 } 100% { opacity: 0; scale: 1.15 } }
@@ -177,9 +205,6 @@ const CSS = `
 #hud .hint { position: absolute; left: 16px; top: 190px; font-size: 13px; opacity: .6; letter-spacing: 1px; }
 #hud .dead .cls { font-size: 16px; opacity: .85; margin-top: 10px; font-family: 'Barlow', sans-serif; }
 #hud .dead .cls b { color: #f2d36b; }
-#hud .equip { position: absolute; right: 36px; bottom: 118px; display: flex; gap: 14px; font-size: 16px; letter-spacing: 1px; }
-#hud .equip span b { color: #f2d36b; font-size: 18px; }
-#hud .equip span.empty { opacity: .35; }
 #hud .whiteout { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
 #hud .nade { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
 #hud .nade i { position: absolute; left: -16px; top: -120px; width: 32px; height: 32px; border-radius: 50%; background: rgba(200,30,20,.85);
@@ -191,7 +216,31 @@ const CSS = `
 @keyframes countPop { 0% { transform: translate(-50%, -50%) scale(1.6) } 22% { transform: translate(-50%, -50%) scale(1) } 100% { transform: translate(-50%, -50%) scale(.92) } }
 #hud .board td.bd { padding: 1px 4px; width: 30px; }
 #hud .board td.lv { opacity: .7; font-size: 15px; white-space: nowrap; }
-#hud .end .pcard { width: min(440px, 90vw); margin-bottom: 8px; }
+#hud .end .pcard { width: min(400px, 90vw); margin: 0; }
+#hud .end { overflow-y: auto; padding: 24px 0; z-index: 5; background: rgba(5,3,4,.9); }
+#hud .report { width: min(980px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 14px; animation: repIn .5s ease-out; }
+#hud .report .rh { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+#hud .report .rsub { font-size: 20px; letter-spacing: 2px; opacity: .8; margin-top: 6px; }
+#hud .report .rstats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+#hud .report .rstats div { background: rgba(255,255,255,.05); border: 1px solid rgba(232,226,208,.16); padding: 10px 12px; display: flex; flex-direction: column; }
+#hud .report .rstats b { font-size: 34px; line-height: 1; color: #f2d36b; font-variant-numeric: tabular-nums; }
+#hud .report .rstats span { font-size: 13px; letter-spacing: 2px; opacity: .65; margin-top: 4px; }
+#hud .report .rcols { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
+#hud .report .rl { font-size: 14px; letter-spacing: 4px; opacity: .6; margin-bottom: 6px; }
+#hud .report .xr { display: flex; justify-content: space-between; font-size: 18px; padding: 4px 0; border-bottom: 1px solid rgba(232,226,208,.1); }
+#hud .report .xr b { color: #f2d36b; font-variant-numeric: tabular-nums; }
+#hud .report .xr.tot { font-size: 24px; border-bottom: none; padding-top: 8px; }
+#hud .report .promo { color: #9fd36b; font-size: 18px; letter-spacing: 2px; margin: 6px 0; }
+#hud .report .rbar { position: relative; height: 10px; background: rgba(255,255,255,.1); margin-top: 6px; overflow: hidden; }
+#hud .report .rbar i { position: absolute; left: 0; top: 0; bottom: 0; background: #f2d36b; animation: barIn 1.2s ease-out; }
+#hud .report .rbar i.was { background: rgba(242,211,107,.35); z-index: 1; animation: none; }
+#hud .report .rnext { font-size: 14px; opacity: .65; margin-top: 4px; letter-spacing: 1px; }
+#hud .report .runl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+#hud .report .runl li { font-size: 16px; padding: 6px 10px; background: rgba(126,200,255,.08); border-left: 3px solid #7ec8ff; letter-spacing: .5px; }
+#hud .report .runl li.none { border-left-color: rgba(232,226,208,.3); background: none; opacity: .6; }
+@media (max-width: 760px) { #hud .report .rstats { grid-template-columns: repeat(3, 1fr); } #hud .report .rcols { grid-template-columns: 1fr; } }
+@keyframes repIn { from { opacity: 0; transform: translateY(14px) } }
+@keyframes barIn { from { width: 0 } }
 @keyframes pop { 0% { transform: scale(1.4); opacity: 0 } 12% { transform: scale(1); opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0; transform: translateY(-24px) } }
 @keyframes feedIn { from { transform: translateX(20px); opacity: 0 } }
 @keyframes blink { 50% { opacity: .4 } }
@@ -219,6 +268,12 @@ export class Hud {
   private hit: HTMLDivElement;
   private ammoN: HTMLDivElement;
   private ammoW: HTMLDivElement;
+  private modeEl!: HTMLSpanElement;
+  private reloadBar!: HTMLElement;
+  private altEl!: HTMLDivElement;
+  private hpEl!: HTMLDivElement;
+  private ammoKey = '';
+  private hpKey = '';
   private bullets: HTMLDivElement;
   private rankText: HTMLDivElement;
   private rankBar: HTMLElement;
@@ -279,10 +334,16 @@ export class Hud {
     this.xhair = el('div', 'xhair', this.root);
     this.xh = ['t', 'b', 'l', 'r'].map((c) => el('i', c, this.xhair));
     this.hit = el('div', 'hit', this.root);
-    const ammo = el('div', 'ammo', this.root);
+    const ammo = el('div', 'wpanel', this.root);
+    const wh = el('div', 'wh', ammo);
+    this.modeEl = el('span', 'mode', wh);
+    this.ammoW = el('div', 'w', wh);
     this.ammoN = el('div', 'n', ammo);
     this.bullets = el('div', 'bullets', ammo);
-    this.ammoW = el('div', 'w', ammo);
+    this.reloadBar = el('i', '', el('div', 'rl', ammo));
+    this.altEl = el('div', 'alt', ammo);
+    this.equipEl = el('div', 'equip', ammo);
+    this.hpEl = el('div', 'hp', this.root, '<div class="hn"></div><div class="hb"><i></i></div>');
     this.reload = el('div', 'reload', this.root, 'RELOADING');
     const rank = el('div', 'rank', this.root);
     rank.style.display = 'none';
@@ -306,7 +367,6 @@ export class Hud {
     this.match = el('div', 'match', this.root);
     this.board = el('div', 'board', this.root);
     this.end = el('div', 'end', this.root);
-    this.equipEl = el('div', 'equip', this.root);
     this.nadeEl = el('div', 'nade', this.root);
     this.white = el('div', 'whiteout', this.root);
     this.picker = el('div', 'picker', this.root);
@@ -347,17 +407,47 @@ export class Hud {
     this.hitT = kill ? 0.35 : 0.2;
   }
 
-  ammo(name: string, ammo: number, reserve: number, mag: number, reloading: boolean) {
+  /**
+   * Weapon panel: name and fire mode, a big round count over the reserve, the magazine
+   * (one pip per round, or a belt bar for big mags), reload progress and the other weapon.
+   */
+  ammo(name: string, ammo: number, reserve: number, mag: number, reloading: boolean, info: { mode?: string; other?: string; reloadT?: number } = {}) {
+    const key = `${name}|${ammo}|${reserve}|${mag}|${reloading}|${info.mode}|${info.other}|${Math.round((info.reloadT ?? -1) * 40)}`;
+    if (key === this.ammoKey) return;
+    this.ammoKey = key;
     this.ammoN.innerHTML = `${ammo}<small> / ${reserve}</small>`;
+    this.ammoN.classList.toggle('low', ammo <= Math.max(1, mag * 0.2));
     this.ammoW.textContent = name;
-    if (this.bullets.childElementCount !== mag) {
-      this.bullets.innerHTML = '';
-      for (let i = 0; i < mag; i++) el('b', '', this.bullets);
+    this.modeEl.textContent = info.mode ?? '';
+    this.modeEl.style.display = info.mode ? '' : 'none';
+    const belt = mag > 40;
+    this.bullets.classList.toggle('belt', belt);
+    if (belt) {
+      if (this.bullets.childElementCount !== 1 || this.bullets.firstElementChild!.tagName !== 'I') this.bullets.innerHTML = '<i></i>';
+      (this.bullets.firstElementChild as HTMLElement).style.width = `${(ammo / mag) * 100}%`;
+    } else {
+      if (this.bullets.childElementCount !== mag || this.bullets.firstElementChild?.tagName !== 'B') {
+        this.bullets.innerHTML = '';
+        for (let i = 0; i < mag; i++) el('b', '', this.bullets);
+      }
+      for (let i = 0; i < mag; i++) (this.bullets.children[i] as HTMLElement).className = i < mag - ammo ? 'spent' : '';
     }
-    for (let i = 0; i < mag; i++) (this.bullets.children[i] as HTMLElement).className = i < mag - ammo ? 'spent' : '';
+    const rl = this.reloadBar.parentElement!;
+    rl.classList.toggle('on', reloading);
+    this.reloadBar.style.width = `${Math.max(0, Math.min(1, info.reloadT ?? 0)) * 100}%`;
+    this.altEl.innerHTML = info.other ? `<b>[1/2]</b> ${info.other}` : '';
     this.reload.style.opacity = reloading ? '1' : ammo === 0 ? '1' : '0';
     this.reload.textContent = reloading ? 'RELOADING' : reserve > 0 ? 'PRESS [R] TO RELOAD' : 'NO AMMO';
-    this.ammoN.style.color = ammo <= mag * 0.2 ? '#ff5a3a' : '';
+  }
+
+  health(hp: number, max: number) {
+    const v = Math.max(0, Math.ceil(hp));
+    const key = `${v}|${max}`;
+    if (key === this.hpKey) return;
+    this.hpKey = key;
+    (this.hpEl.querySelector('.hn') as HTMLElement).innerHTML = `${v}<small>HEALTH</small>`;
+    (this.hpEl.querySelector('.hb i') as HTMLElement).style.width = `${(hp / max) * 100}%`;
+    this.hpEl.classList.toggle('low', hp / max < 0.35);
   }
 
   rank(level: number, xpIn: number, xpNeed: number, next: string) {
@@ -465,17 +555,21 @@ export class Hud {
     if (draw) draw(this.tabletCtx, 440);
   }
 
-  private rankQueue: [string, string, string, string][] = [];
+  private rankQueue: [string, string, string, string, string, boolean][] = [];
   private rankT = 0;
-  /** Promotion: rays, flash, the new badge slamming in, then level, rank and unlocks. */
-  rankUp(badge: string, level: string, rank: string, unlocks: string) {
+  /**
+   * Promotion: rays, flash, the new badge slamming in, then level, rank and unlocks.
+   * Also used (smaller, quicker) for attachment and camo unlocks mid-match.
+   */
+  rankUp(badge: string, level: string, rank: string, unlocks: string, kicker = 'PROMOTED', minor = false) {
     if (this.rankT > 0) {
-      this.rankQueue.push([badge, level, rank, unlocks]);
+      this.rankQueue.push([badge, level, rank, unlocks, kicker, minor]);
       return;
     }
     this.rankEl.innerHTML = `<div class="rays"></div><div class="flash"></div><div class="bd">${badge}</div>
-      <div class="txt"><div class="k">PROMOTED</div><div class="l">${level}</div><div class="r">${rank}</div>${unlocks ? `<div class="u">UNLOCKED · ${unlocks}</div>` : ''}</div>`;
+      <div class="txt"><div class="k">${kicker}</div><div class="l">${level}</div><div class="r">${rank}</div>${unlocks ? `<div class="u">${minor ? unlocks : `UNLOCKED · ${unlocks}`}</div>` : ''}</div>`;
     this.rankEl.classList.remove('show');
+    this.rankEl.classList.toggle('minor', minor);
     void this.rankEl.offsetWidth;
     this.rankEl.classList.add('show');
     this.rankT = 4.2;
@@ -519,7 +613,9 @@ export class Hud {
   }
 
   equipment(frags: number, tac: number, tacName: string) {
-    const html = `<span class="${frags ? '' : 'empty'}">[G] FRAG <b>${frags}</b></span><span class="${tac ? '' : 'empty'}">[Q] ${tacName} <b>${tac}</b></span>`;
+    const frag = '<svg viewBox="0 0 20 20"><circle cx="10" cy="12" r="6" fill="#c9c2a8"/><rect x="8" y="3" width="5" height="4" fill="#c9c2a8"/><path d="M13 4l4-2" stroke="#c9c2a8" stroke-width="1.6"/></svg>';
+    const can = '<svg viewBox="0 0 20 20"><rect x="5" y="4" width="10" height="14" rx="2" fill="#9fb0b8"/><rect x="7" y="2" width="6" height="3" fill="#9fb0b8"/></svg>';
+    const html = `<span class="${frags ? '' : 'empty'}">${frag}[G] <b>${frags}</b></span><span class="${tac ? '' : 'empty'}">${can}[Q] ${tacName} <b>${tac}</b></span>`;
     if (this.equipEl.innerHTML !== html) this.equipEl.innerHTML = html;
   }
 
@@ -668,3 +764,18 @@ export class Hud {
     c.fill();
   }
 }
+
+/** Emblem for an attachment unlock: a hexagon with a glyph for the part type. */
+export function attachIcon(kind: 'optic' | 'muzzle' | 'under' | 'mag' | 'sidearm'): string {
+  const glyph = {
+    optic: '<circle cx="64" cy="64" r="22" fill="none" stroke="#e8f4ff" stroke-width="6"/><path d="M64 34v16M64 78v16M34 64h16M78 64h16" stroke="#e8f4ff" stroke-width="5"/>',
+    muzzle: '<rect x="30" y="52" width="68" height="24" rx="5" fill="#e8f4ff"/><path d="M44 52v24M58 52v24M72 52v24" stroke="#1d3550" stroke-width="4"/><rect x="96" y="58" width="10" height="12" fill="#e8f4ff"/>',
+    under: '<rect x="30" y="38" width="68" height="14" rx="3" fill="#e8f4ff"/><path d="M56 52h18l-4 42h-12z" fill="#e8f4ff"/>',
+    mag: '<path d="M50 30h28l-2 22c6 14 10 28 6 44H52c-4-16 0-30-2-44z" fill="#e8f4ff"/><path d="M54 40h20" stroke="#1d3550" stroke-width="4"/>',
+    sidearm: '<path d="M30 44h66v16H60l-6 30H40l4-30H30z" fill="#e8f4ff"/>',
+  }[kind];
+  return `<div class="unl"><svg viewBox="0 0 128 128"><path d="M64 6l52 29v58l-52 29-52-29V35z" fill="#1d3550" stroke="#7ec8ff" stroke-width="5"/>${glyph}</svg></div>`;
+}
+
+/** Emblem for a camo unlock: the camo itself in a gold ring. */
+export const camoIcon = (swatch: string) => `<div class="unl"><div class="disc" style="background:${swatch}"></div></div>`;

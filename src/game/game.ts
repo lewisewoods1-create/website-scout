@@ -10,15 +10,15 @@ import { Throwables, type ThrowKind } from './throwables';
 import { Viewmodel, Gun } from './viewmodel';
 import { Player } from './player';
 import { Input } from './input';
-import { Hud, type MapMarker } from './hud';
+import { Hud, attachIcon, camoIcon, type MapMarker } from './hud';
 import { Sfx } from './audio';
 import { Effects } from './effects';
 import { cfgFromLoadout, type WeaponCfg } from './weapons';
-import { CAMOS, cacUnlocked, classSlots, premadeClasses, classOf, computeStats, hasDeadSignal, hasGold, hasMastery, isUnlocked, type HitZone, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type PrimaryId, type WeaponId } from './loadout';
+import { CAMOS, ULTIMATE_CAMO, enforceLevelUnlocks, cacUnlocked, classSlots, premadeClasses, classOf, computeStats, hasAllMasteries, hasGold, hasMastery, isUnlocked, type HitZone, loadClasses, WEAPON_CLASSES, camosFor, MAGS, MUZZLES, OPTICS, SEC_ATTACH, UNDERS, WEAPONS, type Loadout, type PrimaryId, type WeaponId } from './loadout';
 import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelForXp, xpForLevel, XP, MAX_LEVEL, type Profile, type SoldierLook } from './progression';
 import { nextUnlock, unlockTrack } from './unlocks';
 import { badgeImg, badgeThumb, rankInfo, thumbVersion } from './badges';
-import { playerCard } from './cosmetics';
+import { playerCard, UNIFORM_CAMOS, uniformProgress } from './cosmetics';
 import { bump, bumpMax, challengeById, checkChallenges } from './challenges';
 import { OPERATORS } from './operators';
 import { STREAKS, StreakRuntime, streakIcon, type StreakId } from './killstreaks';
@@ -172,6 +172,16 @@ export class Game {
       lowHp: false,
       lastKiller: null as Combatant | null,
       statT: 0,
+      // after-match report
+      xp: {} as Record<string, number>,
+      unlocks: [] as string[],
+      shots: 0,
+      hits: 0,
+      heads: 0,
+      bestStreak: 0,
+      startXp: 0,
+      startLevel: 1,
+      uniformsBefore: 0,
     };
   }
   /** details of the hit that's about to be registered (for challenge tracking) */
@@ -492,6 +502,9 @@ export class Game {
     this.sfx.music('match');
     this.hud.clearOverlays();
     this.ms = Game.freshMatchStats();
+    this.ms.startXp = this.profile.xp;
+    this.ms.startLevel = levelForXp(this.profile.xp);
+    this.ms.uniformsBefore = this.uniformCamosEarned();
     this.lifeKills.clear();
     bump(this.profile, `played_${cfg.mapId}`);
     this.streak = 0;
@@ -614,7 +627,8 @@ export class Game {
     const lvl = levelForXp(this.profile.xp);
     const all = this.settings.unlockAll;
     if (!cacUnlocked(lvl, all)) return premadeClasses();
-    return custom.slice(0, classSlots(lvl, all));
+    const slots = custom.slice(0, classSlots(lvl, all));
+    return all ? slots : slots.map((c) => enforceLevelUnlocks(c, lvl));
   }
 
   /** Swap class: applied immediately if dead/at spawn, otherwise next life. */
@@ -706,17 +720,45 @@ export class Game {
       bump(pr, 'loss_now');
       bumpMax(pr, 'loss_run', pr.stats.loss_now);
     }
+    this.tally(won ? 'WIN BONUS' : 'MATCH BONUS', bonus);
     this.addXp(bonus, before);
-    const kd = this.agent.deaths ? (this.agent.kills / this.agent.deaths).toFixed(2) : String(this.agent.kills);
-    this.hud.endScreen(
-      `${playerCard(this.profile)}<div class="t ${cls}">${title}</div>
-       <div style="font-size:26px">${MODES[this.cfg.mode].label}${this.cfg.mode === 'tdm' ? ` · ${this.teamScore[0]} – ${this.teamScore[1]}` : ''}</div>
-       <div style="font-size:24px">KILLS ${this.agent.kills} · DEATHS ${this.agent.deaths} · K/D ${kd}</div>
-       <div style="font-size:30px;color:#f2d36b">+${this.matchXp} XP <span style="font-size:20px;opacity:.75">(MATCH BONUS +${bonus})</span></div>`,
-      () => this.onExit(),
-    );
+    const newCamos = this.uniformCamosEarned() - m.uniformsBefore;
+    if (newCamos > 0) m.unlocks.push(`${newCamos} OPERATOR CAMO${newCamos > 1 ? 'S' : ''} · SOLDIER PAGE`);
+    this.hud.endScreen(this.reportHtml(title, cls), () => this.onExit());
     this.hud.deadScreen(false);
     this.hud.scoreboardTable(false);
+  }
+
+  /** The after-action report: result, combat stats, XP breakdown, level progress and unlocks. */
+  private reportHtml(title: string, cls: string) {
+    const m = this.ms;
+    const a = this.agent;
+    const kd = a.deaths ? (a.kills / a.deaths).toFixed(2) : a.kills.toFixed(2);
+    const acc = m.shots ? Math.round((m.hits / m.shots) * 100) : 0;
+    const level = levelForXp(this.profile.xp);
+    const base = xpForLevel(level);
+    const need = level >= MAX_LEVEL ? 1 : xpForLevel(level + 1) - base;
+    const pct = level >= MAX_LEVEL ? 100 : Math.min(100, ((this.profile.xp - base) / need) * 100);
+    const startPct = level > m.startLevel ? 0 : level >= MAX_LEVEL ? 100 : Math.min(100, ((m.startXp - base) / need) * 100);
+    const stat = (k: string, v: string | number) => `<div><b>${v}</b><span>${k}</span></div>`;
+    const xpRows = Object.entries(m.xp)
+      .sort((x, y) => y[1] - x[1])
+      .map(([k, v]) => `<div class="xr"><span>${k}</span><b>+${v.toLocaleString()}</b></div>`)
+      .join('');
+    const promo = level > m.startLevel ? `<div class="promo">PROMOTED · LEVEL ${m.startLevel} → ${level} · ${rankInfo(level).name.toUpperCase()}</div>` : '';
+    const unlocks = m.unlocks.length
+      ? m.unlocks.slice(0, 14).map((u) => `<li>${u}</li>`).join('') + (m.unlocks.length > 14 ? `<li>+${m.unlocks.length - 14} MORE</li>` : '')
+      : '<li class="none">Nothing new this match.</li>';
+    return `<div class="report">
+      <div class="rh">${playerCard(this.profile)}<div><div class="t ${cls}">${title}</div>
+        <div class="rsub">${MODES[this.cfg.mode].label}${this.cfg.mode === 'tdm' ? ` · ${this.teamScore[0]} – ${this.teamScore[1]}` : ''} · ${mapById(this.cfg.mapId).name}</div></div></div>
+      <div class="rstats">${stat('KILLS', a.kills)}${stat('DEATHS', a.deaths)}${stat('K/D', kd)}${stat('HEADSHOTS', m.heads)}${stat('ACCURACY', `${acc}%`)}${stat('BEST STREAK', m.bestStreak)}</div>
+      <div class="rcols">
+        <div><div class="rl">XP EARNED</div>${xpRows}<div class="xr tot"><span>TOTAL</span><b>+${this.matchXp.toLocaleString()} XP</b></div>
+          ${promo}<div class="rbar"><i class="was" style="width:${startPct}%"></i><i style="width:${pct}%"></i></div>
+          <div class="rnext">${level >= MAX_LEVEL ? 'MAX LEVEL' : `${(this.profile.xp - base).toLocaleString()} / ${need.toLocaleString()} XP TO LEVEL ${level + 1}`}</div></div>
+        <div><div class="rl">UNLOCKED</div><ul class="runl">${unlocks}</ul></div>
+      </div></div>`;
   }
 
   // ------------------------------------------------------------------ rules
@@ -980,9 +1022,10 @@ export class Game {
   private damagePlayer(dmg: number, from: Combatant, at: THREE.Vector3, weapon?: string) {
     const p = this.player;
     if (!p.alive || this.phase !== 'match') return;
+    const blast = weapon === 'FRAG' || Object.values(STREAKS).some((s) => s.name === weapon);
+    if (blast && this.classes[this.classIdx]?.perk2 === 'flak') dmg *= 0.55;
     p.health -= dmg;
     p.lastHit = this.now;
-    const blast = weapon === 'FRAG' || Object.values(STREAKS).some((s) => s.name === weapon);
     if (blast && p.health > 0 && p.health / p.maxHealth < 0.2) bump(this.profile, 'explosion_survivals');
     this.punch += 0.02;
     this.hud.damageFrom(Math.atan2(at.x - p.pos.x, at.z - p.pos.z));
@@ -1052,6 +1095,8 @@ export class Game {
     const best = struck.length ? struck[struck.length - 1].t : wall;
     const end = eye.clone().addScaledVector(dir, best);
     bump(this.profile, 'shots_fired');
+    this.ms.shots++;
+    if (struck.some((h) => !this.isFriendly(h.bot))) this.ms.hits++;
     const muzzle = eye.clone().addScaledVector(fwd, 0.6).addScaledVector(right, 0.12 * (1 - this.vm.ads)).addScaledVector(up, -0.1 * (1 - this.vm.ads * 0.6));
     const st = this.gun.stats;
     if (!st.suppressed && Math.random() < 0.5) this.effects.tracer(muzzle, end);
@@ -1118,20 +1163,24 @@ export class Game {
     const heads = this.profile.weaponHeads;
     const cls = classOf(id);
     const masteredBefore = hasMastery(heads, cls);
-    const signalBefore = hasDeadSignal(heads);
+    const signalBefore = hasAllMasteries(heads);
     const n = (heads[id] ?? 0) + 1;
     heads[id] = n;
     for (const camo of CAMOS.filter((c) => c.heads === n)) {
-      this.hud.showBanner(camo.id === 'gold' ? 'GOLD CAMO' : 'CAMO UNLOCKED', `${camo.name} FOR ${WEAPONS[id].name}`, 4);
+      this.hud.rankUp(camoIcon(camo.swatch!), camo.name, WEAPONS[id].name, `${n} HEADSHOT KILLS`, camo.id === 'gold' ? 'GOLD CAMO' : 'CAMO UNLOCKED', true);
+      this.sfx.levelUp();
+      this.ms.unlocks.push(`${camo.name} CAMO · ${WEAPONS[id].name}`);
     }
     if (!masteredBefore && hasMastery(heads, cls)) {
       const wc = WEAPON_CLASSES[cls];
-      this.hud.showBanner('MASTERY CAMO', `${wc.camo.name} · ${wc.name}`, 5);
-      this.sfx.levelUp();
-    }
-    if (!signalBefore && hasDeadSignal(heads)) {
-      this.hud.showBanner('DEAD SIGNAL', 'PRISM IN EVERY CLASS · UNLOCKED FOR ALL WEAPONS', 6);
+      this.hud.rankUp(camoIcon(wc.camo.swatch!), wc.camo.name, wc.name, 'GOLD ON EVERY WEAPON IN THE CLASS', 'MASTERY CAMO', true);
       this.sfx.rankUp();
+      this.ms.unlocks.push(`${wc.camo.name} · ${wc.name}`);
+    }
+    if (!signalBefore && hasAllMasteries(heads)) {
+      this.hud.rankUp(camoIcon(ULTIMATE_CAMO.swatch!), ULTIMATE_CAMO.name, 'EVERY WEAPON', `${WEAPON_CLASSES.ar.camo.name} IN EVERY CLASS`, 'ULTIMATE CAMO', true);
+      this.sfx.rankUp();
+      this.ms.unlocks.push(`${ULTIMATE_CAMO.name} · EVERY WEAPON`);
     }
   }
 
@@ -1309,6 +1358,8 @@ export class Game {
       for (const c of fresh) {
         grantXp(this.profile, c.xp);
         this.matchXp += c.xp;
+        this.tally('CHALLENGES', c.xp);
+        this.ms.unlocks.push(`CALLING CARD · ${c.name}`);
         this.hud.showBanner('CHALLENGE COMPLETE', `${c.name} · +${c.xp} XP · BANNER UNLOCKED`, 4);
       }
       this.sfx.levelUp();
@@ -1319,9 +1370,16 @@ export class Game {
     const before = levelForXp(this.profile.xp);
     this.trackKill(victim, head, weaponId);
     let xp = XP.kill;
+    this.tally('KILLS', XP.kill);
+    // Scavenger: a kill with a gun tops its reserve up by one magazine
+    if (this.classes[this.classIdx]?.perk1 === 'scavenger' && weaponId === this.gun.stats.weapon) {
+      const g = this.gun;
+      g.reserve = Math.min(g.stats.reserve, g.reserve + g.magSize);
+    }
     this.hud.popup(`+${XP.kill}`);
     if (weaponId === 'frag') {
       xp += XP.grenade;
+      this.tally('GRENADE KILLS', XP.grenade);
       this.hud.popup(`GRENADE KILL +${XP.grenade}`, 'hs');
     }
     // weapon progression: attachments unlock at kill counts
@@ -1329,30 +1387,45 @@ export class Game {
     this.profile.weaponKills[weaponId] = n;
     const w = WEAPONS[weaponId as WeaponId];
     if (w) {
-      const pool = w.slot === 'primary' ? [...OPTICS, ...MUZZLES, ...UNDERS, ...MAGS] : w.id === 'p9' ? SEC_ATTACH : [];
-      const got = pool.filter((c) => c.kills === n);
-      if (got.length) this.hud.showBanner('WEAPON UNLOCK', `${got.map((c) => c.name).join(' · ')} FOR ${w.name}`, 4);
+      const pool = w.slot === 'primary' ? [...OPTICS, ...MUZZLES, ...UNDERS, ...MAGS] : !w.noAttach ? SEC_ATTACH : [];
+      for (const c of pool.filter((c) => c.kills === n)) {
+        const kind = w.slot === 'secondary' ? 'sidearm' : OPTICS.includes(c as never) ? 'optic' : MUZZLES.includes(c as never) ? 'muzzle' : UNDERS.includes(c as never) ? 'under' : 'mag';
+        this.hud.rankUp(attachIcon(kind), c.name, w.name, c.desc, 'ATTACHMENT UNLOCKED', true);
+        this.sfx.levelUp();
+        this.ms.unlocks.push(`${c.name} · ${w.name}`);
+      }
     }
     if (head) {
       xp += XP.headshot;
+      this.tally('HEADSHOTS', XP.headshot);
+      this.ms.heads++;
       this.hud.popup(`HEADSHOT +${XP.headshot}`, 'hs');
       this.profile.headshots++;
       if (w) this.onWeaponHeadshot(w.id);
     }
     if (victim.pos.distanceTo(this.player.pos) > 35) {
       xp += XP.longshot;
+      this.tally('LONGSHOTS', XP.longshot);
       this.hud.popup(`LONGSHOT +${XP.longshot}`, 'hs');
     }
     if (victim.name === this.killedBy) {
       xp += XP.revenge;
+      this.tally('PAYBACK', XP.revenge);
       this.hud.popup(`PAYBACK +${XP.revenge}`, 'hs');
       this.killedBy = '';
     }
     this.streak++;
     this.profile.kills++;
     this.profile.bestStreak = Math.max(this.profile.bestStreak, this.streak);
-    if (this.streak === 3) xp += XP.streak3;
-    if (this.streak === 5) xp += XP.streak5;
+    this.ms.bestStreak = Math.max(this.ms.bestStreak, this.streak);
+    if (this.streak === 3) {
+      xp += XP.streak3;
+      this.tally('KILL STREAKS', XP.streak3);
+    }
+    if (this.streak === 5) {
+      xp += XP.streak5;
+      this.tally('KILL STREAKS', XP.streak5);
+    }
     if (this.streak >= 2) this.hud.streakCount(this.streak);
     // earn any picked killstreak whose kill count we just hit
     for (const id of this.profile.streaks) {
@@ -1365,6 +1438,16 @@ export class Game {
     this.addXp(xp, before);
   }
 
+  /** After-match XP breakdown by source. */
+  private tally(src: string, xp: number) {
+    this.ms.xp[src] = (this.ms.xp[src] ?? 0) + xp;
+  }
+
+  private uniformCamosEarned() {
+    const lvl = levelForXp(this.profile.xp);
+    return UNIFORM_CAMOS.filter((u) => uniformProgress(u, this.profile, lvl) >= u.target).length;
+  }
+
   private addXp(xp: number, levelBefore: number) {
     grantXp(this.profile, xp);
     this.matchXp += xp;
@@ -1374,6 +1457,7 @@ export class Game {
       const unlock = unlockTrack().get(after)?.join(' · ');
       const rank = rankInfo(after).name.toUpperCase();
       const extra = after >= MAX_LEVEL && canPrestige(this.profile) ? 'PRESTIGE IS AVAILABLE IN BARRACKS' : unlock ?? '';
+      for (let l = levelBefore + 1; l <= after; l++) for (const u of unlockTrack().get(l) ?? []) this.ms.unlocks.push(`LVL ${l} · ${u}`);
       this.hud.rankUp(badgeImg(after, 0, 128, false), `LEVEL ${after}`, rank, extra);
       this.sfx.rankUp();
     }
@@ -1847,7 +1931,7 @@ export class Game {
       if (deploying) this.updateDeploy(dt);
       this.updateCrates(dt);
       const canFire = !p.sprinting && this.vm.reload < 0 && !this.vm.busy && !deploying;
-      const shots = this.gun.update(dt, inp.fire, canFire, this.vm.busy);
+      const shots = this.gun.update(dt, inp.fire, canFire, this.vm.busy, inp.clicks);
       for (let i = 0; i < shots && this.phase === 'match'; i++) this.shoot();
       if (inp.fire && !this.wasFiring && this.gun.ammo === 0 && this.gun.reserve === 0) this.sfx.dryFire();
       this.wasFiring = inp.fire;
@@ -1861,7 +1945,7 @@ export class Game {
     }
     this.vm.reload = this.gun.reloading;
     this.vm.reloadEmpty = this.gun.emptyReload;
-    this.vm.slideLocked = this.gun.stats.weapon === 'p9' && this.gun.ammo === 0 && (this.gun.reloading < 0 || this.gun.reloading < 0.8);
+    this.vm.slideLocked = this.vm.kind === 'pistol' && this.gun.ammo === 0 && (this.gun.reloading < 0 || this.gun.reloading < 0.8);
     this.bloom = damp(this.bloom, 0, 4, dt);
     this.punch = damp(this.punch, 0, 10, dt);
     this.landDip = damp(this.landDip, 0, 8, dt);
@@ -1937,7 +2021,13 @@ export class Game {
 
     // HUD
     const g = this.gun;
-    this.hud.ammo(g.name, g.ammo, g.reserve, g.magSize, g.reloading >= 0);
+    const st = g.stats;
+    this.hud.ammo(g.name, g.ammo, g.reserve, g.magSize, g.reloading >= 0, {
+      mode: st.bolt ? 'BOLT' : st.auto ? 'AUTO' : 'SEMI',
+      other: this.guns[1 - this.active]?.name,
+      reloadT: g.reloading,
+    });
+    this.hud.health(p.alive ? p.health : 0, p.maxHealth);
     this.hud.equipment(this.frags, this.tacs, this.classes[this.classIdx].tactical === 'stun' ? 'STUN' : 'SMOKE');
     const nades: number[] = [];
     for (const f of this.throwables.frags()) {

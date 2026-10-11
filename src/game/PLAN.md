@@ -20,6 +20,13 @@ A public URL (e.g. `deadpixel.gg`) where anyone can play bot matches instantly w
 | 5. Analytics + crash reports | Plausible/PostHog + Sentry | Session length, mode/map picks, FPS buckets by GPU. |
 | 6. Performance budget | 60fps on a 2019 integrated GPU at 480p | Settings already expose resolution. Add auto-detect on first run. |
 
+### Saves (built, local; cloud-ready)
+`save.ts` owns all persistence: profile, classes and settings are versioned JSON with a rolling `.bak` copy
+(corrupt writes fall back), the browser is asked for persistent storage, and Settings → Save Data exports/imports
+a checksummed save code or `.dpsave` file. For accounts, implement `RemoteSync { push, pull }` against the
+`profiles`/`classes` tables below and call `setRemoteSync()` after login; writes are then pushed (debounced)
+and `pullRemote()` restores a newer cloud copy. Online XP stays server-written.
+
 ### Data model (Supabase)
 - `profiles`: user_id, callsign, xp, level, prestige, kills, deaths, headshots, best_streak
 - `classes`: user_id, slot (1–3), loadout JSON
@@ -159,7 +166,7 @@ A small companion that **floats just under the gun** in first person and reacts 
   The pack defines 75 levels (25 ranks x 3 tiers), one badge per level.
 - Banners (calling cards) unlock by level, prestige and challenges; the Soldier page picks the active one.
 - Camos (camo overlay pack): Grunt Grid 20, Rubble 50, Sand Tiger 100, Frostbite 200, Red Static 500 headshot kills,
-  then Gold. Gold on every weapon in a class unlocks Prism for that class; Prism in every class unlocks Dead Signal.
+  then Gold. Gold on every weapon in a class unlocks Dead Signal for that class; Dead Signal in every class unlocks Prism.
   Prism and Dead Signal animate. Progress lives in Barracks.
 - Create a Class opens at level 4 (premade classes until then); custom classes 4 and 5 open at level 10.
 - Challenges: 100, one per calling card (`challenges.ts`, art in `public/game/cards/`).
@@ -167,8 +174,13 @@ A small companion that **floats just under the gun** in first person and reacts 
 
 ## 6. Weapons
 
-Built: 12 primaries in 5 classes plus 2 handguns. Every gun has its own model, stats, kill-based attachments,
-headshot camos and a class mastery camo.
+Built: 12 primaries in 5 classes plus 4 sidearms (P-9, R-357, MP-18 Hornet machine pistol, D-50 Hammer). Every gun
+has its own model, stats, kill-based attachments, headshot camos and a class mastery camo.
+
+Unlock track (levels 1–75): weapons, sidearms, perks, tactical and killstreaks are spread so stronger gear sits
+later — e.g. SK-10 3, Kestrel 5, R-357 7, SP-45 9, LM-5 13, MK-20 17, Talon 22, Warden 28, Flak Jacket 32,
+PK-7 36, MP-18 38, Scavenger 40, Vulture 46, Quickdraw 52, D-50 58. New weapons slot in by power the same way.
+Custom classes holding something above the player's level fall back to the starter item.
 
 | Class | Guns | Feel |
 |---|---|---|
@@ -180,7 +192,7 @@ headshot camos and a class mastery camo.
 
 Damage model: hit zones are head, upper body, lower body and limbs. Head multipliers are 1.25-1.6 by class (was 2x).
 
-### Sidearms to scope (3 more)
+### Sidearms to scope (MP-18 and D-50 now built; sawn-off still open)
 1. **Machine pistol** ("STORM-18"): select-fire 9mm, 18/33 rounds, ~1100 rpm. Close-range panic button; huge recoil.
    Attachments: stock, ext mag, suppressor. Needs a burst/auto fire mode on secondaries.
 2. **Hand cannon** (".50 BREACHER"): 7 rounds, two body shots up close, slow handling, big muzzle flip.

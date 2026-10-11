@@ -6,6 +6,8 @@ export class Input {
   /** wheel notches this frame (+ down, - up) */
   wheel = 0;
   fire = false;
+  /** left clicks since the last frame (a click can start and end between two frames) */
+  clicks = 0;
   aim = false;
   locked = false;
   /** debug/automation: accept input without pointer lock */
@@ -33,7 +35,10 @@ export class Input {
     });
     window.addEventListener('mousedown', (e) => {
       if (!this.active) return;
-      if (e.button === 0) this.fire = true;
+      if (e.button === 0) {
+        this.fire = true;
+        this.clicks++;
+      }
       if (e.button === 2) this.aim = true;
     });
     window.addEventListener('mouseup', (e) => {
@@ -67,6 +72,7 @@ export class Input {
 
   endFrame() {
     this.pressed.clear();
+    this.clicks = 0;
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.wheel = 0;

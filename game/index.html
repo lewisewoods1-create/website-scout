@@ -208,7 +208,8 @@
       .go:hover, .go:focus-visible { background: #fff0a8; }
       .go[disabled] { background: #4a4438; color: #8a8270; box-shadow: none; cursor: not-allowed; }
       .stat { display: grid; grid-template-columns: 80px 1fr; gap: 8px; align-items: center; font-size: 12px; letter-spacing: 1px; color: var(--dim); }
-      .stat .b { height: 6px; background: rgba(255,255,255,.1); } .stat .b i { display: block; height: 100%; background: var(--gold); }
+      .stat .b { position: relative; height: 6px; background: rgba(255,255,255,.1); } .stat .b i { display: block; height: 100%; background: var(--gold); }
+      .stat .b i.up, .stat .b i.down { position: absolute; top: 0; } .stat .b i.up { background: var(--ok); } .stat .b i.down { background: var(--enemy); }
       .cac { display: grid; grid-template-columns: 1fr; gap: 6px; }
       .preview { width: 100%; aspect-ratio: 21 / 8; max-width: 100%; background: radial-gradient(ellipse at center, #2a1f22, #0b0809 75%); border: 1px solid var(--line); display: block; }
       .swatch { width: 34px; height: 34px; border: 2px solid var(--line); cursor: pointer; padding: 0; position: relative; }
@@ -254,6 +255,22 @@
       .card.op { border-left: 4px solid var(--acc); }
       .card.op .role { color: var(--acc); font-weight: 700; letter-spacing: 2px; font-size: 11px; }
       .card.op .kit { font-size: 10px; letter-spacing: 1px; opacity: .65; }
+      .savebox { display: flex; flex-direction: column; gap: 8px; }
+      .savebox textarea { background: rgba(0,0,0,.35); color: var(--ink); border: 1px solid var(--line); padding: 8px; font: 12px/1.4 ui-monospace, monospace; resize: vertical; word-break: break-all; }
+      .savebox .file { position: relative; overflow: hidden; display: inline-flex; align-items: center; }
+      .savebox .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+      .fold { all: unset; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-top: 8px; box-sizing: border-box; width: 100%;
+        border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+      .fold:hover, .fold.open { border-color: var(--gold); }
+      .fold span { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 2px; }
+      .fold em { font-style: normal; font-size: 12px; letter-spacing: 1px; color: var(--dim); flex: 1; text-align: right; }
+      .fold i { font-style: normal; font-size: 20px; color: var(--gold); width: 16px; text-align: center; }
+      .banners.small { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 8px; }
+      .banners.small .bcard { height: 40px; }
+      .banners.small .bcard.art { height: auto; }
+      .banners.small .bcard .bname { font-size: 11px; left: 6px; bottom: 4px; }
+      .banners.small .bcard .block { font-size: 9px; }
+      .soldier-side .pcard { max-width: 440px; }
       .ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
       .ugrid .card { padding-top: 0; overflow: hidden; }
       .ugrid .usw { display: block; height: 46px; margin: 0 -12px 8px; border-bottom: 1px solid rgba(255,255,255,.15); }

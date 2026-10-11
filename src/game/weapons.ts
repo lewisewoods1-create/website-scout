@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Materials } from './materials';
 import type { Loadout, MagId, MuzzleId, OpticId, UnderId, WeaponId } from './loadout';
+import { WEAPONS } from './loadout';
 import { group, mesh, rbox, type PlaceOpts } from './util';
 import { acogReticleTex, dotReticleTex, markingTex, reticleTex } from './textures';
 import { camoMaterial, type CamoId } from './camos';
@@ -24,7 +25,7 @@ export interface WeaponCfg {
 
 export function cfgFromLoadout(l: Loadout, slot: 'primary' | 'secondary' = 'primary'): WeaponCfg {
   if (slot === 'secondary') {
-    const pistol = l.secondary === 'p9';
+    const pistol = !WEAPONS[l.secondary].noAttach;
     return {
       weapon: l.secondary,
       optic: 'iron',
@@ -63,11 +64,13 @@ export function buildWeapon(mats: Materials, cfg: WeaponCfg, firstPerson = true)
     mk20: buildMK20,
     p9: buildP9,
     r357: buildR357,
+    mp18: (m, cfg) => buildP9(m, cfg, 'mp18'),
+    d50: (m, cfg) => buildP9(m, cfg, 'd50'),
   };
   const build = builders[cfg.weapon];
   const root = build(m, cfg);
   root.userData.cfg = cfg;
-  root.userData.kind = cfg.weapon === 'p9' ? 'pistol' : cfg.weapon === 'r357' ? 'revolver' : 'rifle';
+  root.userData.kind = cfg.weapon === 'r357' ? 'revolver' : WEAPONS[cfg.weapon].slot === 'secondary' ? 'pistol' : 'rifle';
   if (!firstPerson) {
     const ret = root.getObjectByName('reticle');
     ret?.parent?.remove(ret);
@@ -622,7 +625,8 @@ function addUnder(root: THREE.Object3D, m: Materials, kind: UnderId, y: number, 
 
 // ---------------------------------------------------------------- P-9 pistol
 
-function buildP9(m: Materials, cfg: WeaponCfg): THREE.Group {
+/** The P-9 frame, also the base of the MP-18 machine pistol and the D-50 heavy pistol. */
+function buildP9(m: Materials, cfg: WeaponCfg, variant: 'p9' | 'mp18' | 'd50' = 'p9'): THREE.Group {
   const root = new THREE.Group();
   root.name = 'weapon';
   const slideMat = m.anodized;
@@ -640,7 +644,7 @@ function buildP9(m: Materials, cfg: WeaponCfg): THREE.Group {
   mesh(rbox(0.0035, 0.008, 0.005, 0.001), m.anodized, slide, { pos: [0, 0.0505, -0.112] });
   mesh(cyl(0.0012, 0.0012, 0.001, 10), m.lens, slide, { pos: [0, 0.052, -0.1095], rot: X90 });
   group(root, { pos: [0, 0.0515, 0.05], name: 'sight' });
-  markings(slide, 'P-9  9x19mm', [-0.0127, 0.03, -0.06], 0.05);
+  markings(slide, { p9: 'P-9  9x19mm', mp18: 'MP-18  9x19 AUTO', d50: 'D-50  .50 AE' }[variant], [-0.0127, 0.03, -0.06], 0.05);
   // frame, rail, trigger guard, trigger
   mesh(rbox(0.023, 0.018, 0.165, 0.004, 3), m.polymer, root, { pos: [0, 0.008, -0.025] });
   mesh(rbox(0.021, 0.008, 0.05, 0.002), m.polymer, root, { pos: [0, -0.004, -0.085] });
@@ -655,7 +659,29 @@ function buildP9(m: Materials, cfg: WeaponCfg): THREE.Group {
   mesh(rbox(0.026, 0.012, 0.03, 0.004), m.polymer, grip, { pos: [0, 0.0, 0.028] }); // beavertail
   const mag = group(grip, { pos: [0, -0.104, 0], name: 'mag' });
   const ext = cfg.mag === 'ext';
-  mesh(rbox(0.024, ext ? 0.04 : 0.012, 0.048, 0.004), m.polymer, mag, { pos: [0, ext ? -0.014 : 0.0, 0] });
+  if (variant === 'mp18') {
+    // long stick mag sticks well out of the grip
+    const len = ext ? 0.11 : 0.07;
+    mesh(rbox(0.022, len, 0.044, 0.004), m.polymer, mag, { pos: [0, -len / 2 + 0.006, 0] });
+    mesh(rbox(0.026, 0.008, 0.05, 0.003), m.steel, mag, { pos: [0, -len + 0.004, 0] });
+  } else {
+    mesh(rbox(0.024, ext ? 0.04 : 0.012, 0.048, 0.004), m.polymer, mag, { pos: [0, ext ? -0.014 : 0.0, 0] });
+  }
+  if (variant === 'mp18') {
+    // fire selector, slotted compensator and a folding front grip
+    mesh(rbox(0.004, 0.008, 0.012, 0.001), m.steel, root, { pos: [-0.013, 0.012, 0.01] });
+    if (cfg.muzzle !== 'suppressor') {
+      const comp = mesh(rbox(0.024, 0.026, 0.036, 0.004), m.parkerized, root, { pos: [0, 0.033, -0.142] });
+      for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) mesh(rbox(0.002, 0.004, 0.006, 0.0005), m.hole, comp, { pos: [sx * 0.0121, 0.008, -0.012 + i * 0.011] });
+    }
+    const fg = group(root, { pos: [0, -0.008, -0.085], rot: [0.15, 0, 0] });
+    mesh(rbox(0.014, 0.05, 0.016, 0.004), m.polymer, fg, { pos: [0, -0.026, 0] });
+  }
+  if (variant === 'd50') {
+    // heavy slab-sided slide with a full-length barrel shroud and big sights
+    mesh(rbox(0.03, 0.012, 0.19, 0.003), m.steel, slide, { pos: [0, 0.018, -0.03] });
+    mesh(rbox(0.008, 0.012, 0.012, 0.002), m.anodized, slide, { pos: [0, 0.055, -0.11] });
+  }
   // barrel + muzzle
   const muzzle = group(root, { pos: [0, 0.037, -0.124], name: 'muzzleBase' });
   mesh(cyl(0.0055, 0.0055, 0.004, 16), m.hole, muzzle, { pos: [0, 0, -0.001], rot: X90 });
@@ -667,7 +693,9 @@ function buildP9(m: Materials, cfg: WeaponCfg): THREE.Group {
   } else {
     muzzle.userData.tip = 0;
   }
+  if (variant === 'mp18' && cfg.muzzle !== 'suppressor') muzzle.position.z -= 0.036;
   finishMuzzle(root);
+  if (variant === 'd50') root.scale.setScalar(1.14);
   group(root, { pos: [0, -0.005, 0.03], rot: [-0.26, 0, 0], name: 'gripAnchor' });
   group(root, { pos: [-0.03, -0.05, 0.04], name: 'guardAnchor' });
   return root;

@@ -1,4 +1,5 @@
 import { DEFAULT_STREAKS, STREAKS, type StreakId } from './killstreaks';
+import { readSave, writeSave, SAVE_KEYS } from './save';
 /**
  * Ranks 1-75, then Prestige 1-10 (each prestige resets you to level 1).
  * XP needed per level grows linearly; the profile is stored locally for now.
@@ -68,7 +69,6 @@ export interface Profile {
   look: SoldierLook;
 }
 
-const KEY = 'deadpixel.profile.v1';
 
 export function blankProfile(): Profile {
   return {
@@ -80,9 +80,9 @@ export function blankProfile(): Profile {
 export function loadProfile(): Profile {
   const blank = blankProfile();
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return blank;
-    const p = { ...blank, ...(JSON.parse(raw) as Partial<Profile>) };
+    const saved = readSave<Partial<Profile>>(SAVE_KEYS.profile);
+    if (!saved) return blank;
+    const p = { ...blank, ...saved };
     p.look = { ...blank.look, ...p.look };
     p.weaponKills = { ...p.weaponKills };
     p.weaponHeads = { ...p.weaponHeads };
@@ -97,11 +97,7 @@ export function loadProfile(): Profile {
 }
 
 export function saveProfile(p: Profile) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(p));
-  } catch {
-    // storage unavailable (private mode) — progress just won't persist
-  }
+  writeSave(SAVE_KEYS.profile, p);
 }
 
 /** Add XP, holding at the max level until the player chooses to prestige. */

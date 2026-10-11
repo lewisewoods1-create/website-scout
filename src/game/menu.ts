@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import type { Game, MatchConfig, Mode, DifficultyId, Settings } from './game';
 import { DIFFICULTIES, MODES } from './game';
 import {
-  MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, DEAD_SIGNAL, GOLD_HEADS,
-  CAC_LEVEL, EXTRA_CLASS_LEVEL, PRIMARY_IDS, cacUnlocked, camosFor, classSlots, premadeClasses, computeStats, fitsWeapon, fixAttachments, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
+  MAGS, MUZZLES, OPTICS, PERKS1, PERKS2, PERKS3, SEC_ATTACH, SECONDARIES, TACTICALS, UNDERS, WEAPONS, WEAPON_CLASSES, CAMOS, ULTIMATE_CAMO, GOLD_HEADS,
+  CAC_LEVEL, EXTRA_CLASS_LEVEL, PRIMARY_IDS, cacUnlocked, camosFor, classSlots, premadeClasses, computeStats, fitsWeapon, fixAttachments, liveBars, takesSecAttach, hasGold, hasMastery, isUnlocked, lockText, saveClasses,
   type Choice, type Loadout, type UnlockCtx, type WeaponClassId, type WeaponId,
 } from './loadout';
 import { buildWeapon, cfgFromLoadout } from './weapons';
@@ -13,6 +13,7 @@ import { ART_MAX_LEVEL, badgeImg, prestigeName, rankInfo } from './badges';
 import { nextUnlock, unlockTrack } from './unlocks';
 import { BANNERS, GEAR, UNIFORMS, UNIFORM_CAMOS, bannerUnlocked, ensureBannerStyles, playerCard, uniformProgress, uniformUnlocked, type Banner } from './cosmetics';
 import { OPERATORS, operatorById, type Operator } from './operators';
+import { applySnapshot, downloadSave, exportCode, lastSavedAt, parseCode, storageOk } from './save';
 import { CHALLENGES, THEMES, TIER_NAMES, isDone, statValue } from './challenges';
 import { MAPS } from './maps';
 import { STREAKS, STREAK_ORDER, streakIcon, type StreakId } from './killstreaks';
@@ -64,7 +65,8 @@ export class Menu {
   /** which weapon the Create a Class preview shows */
   private previewSide: 'primary' | 'secondary' = 'primary';
   private soldierTab: 'operator' | 'uniform' | 'cards' = 'operator';
-  private cardGroup = 'rank';
+  private cardOpen = new Set<string>();
+  private importArmed = false;
   private cardsOwned = false;
   /** when the edited class was last saved (for the confirmation pill) */
   private savedAt = 0;
@@ -298,7 +300,15 @@ export class Menu {
       <span><b>SHIFT</b> sprint</span><span><b>SPACE</b> jump</span><span><b>C</b> crouch / slide</span><span><b>R</b> reload</span>
       <span><b>1 / 2 / WHEEL</b> switch weapon</span><span><b>V</b> melee</span><span><b>G</b> frag</span><span><b>Q</b> tactical</span><span><b>4</b> killstreak</span>
       <span><b>SHIFT (SCOPED)</b> hold breath</span>
-      <span><b>TAB</b> scoreboard</span><span><b>ESC</b> pause / back</span></div></div></div>`;
+      <span><b>TAB</b> scoreboard</span><span><b>ESC</b> pause / back</span></div>
+      <div class="label">SAVE DATA</div>
+      <div class="savebox">
+        <div class="sub" style="margin:0">${storageOk() ? `Progress saves automatically in this browser${lastSavedAt() ? ` · last saved ${new Date(lastSavedAt()).toLocaleTimeString()}` : ''}. Keep a backup code or file to move it to another browser or restore it.` : 'This browser is blocking storage, so progress only lasts this session. Export a save code before you close the tab.'}</div>
+        <div class="row"><button type="button" class="go small" data-save="copy">COPY SAVE CODE</button><button type="button" class="go small ghost" data-save="file">DOWNLOAD SAVE FILE</button></div>
+        <textarea id="save-code" rows="3" spellcheck="false" placeholder="Paste a save code here, or load a .dpsave file" aria-label="Save code"></textarea>
+        <div class="row"><button type="button" class="go small ghost" data-save="import">IMPORT CODE</button><label class="go small ghost file">LOAD FILE<input type="file" id="save-file" accept=".dpsave,.txt"></label></div>
+        <div id="save-msg" class="sub" style="margin:0" role="status"></div>
+      </div></div></div>`;
   }
 
   private mapCards() {
@@ -441,8 +451,17 @@ export class Menu {
     if (this.openSlot) this.previewSide = SECONDARY_SLOTS.includes(this.openSlot) ? 'secondary' : 'primary';
     const showSecondary = this.previewSide === 'secondary';
     const w = showSecondary ? sec : prim;
-    const bars = Object.entries(w.bars)
-      .map(([k, v]) => `<div class="stat"><span>${k.toUpperCase()}</span><div class="b"><i style="width:${v * 10}%"></i></div></div>`)
+    // bars follow the attachments: green for what they add, red for what they cost
+    const lb = liveBars(c, showSecondary ? 'secondary' : 'primary');
+    const bars = (Object.keys(lb.now) as (keyof typeof lb.now)[])
+      .map((k) => {
+        const n = lb.now[k];
+        const o = lb.base[k];
+        const lo = Math.min(n, o);
+        const d = Math.abs(n - o);
+        const delta = d > 0.05 ? `<i class="${n > o ? 'up' : 'down'}" style="left:${lo * 10}%;width:${d * 10}%"></i>` : '';
+        return `<div class="stat"><span>${k.toUpperCase()}</span><div class="b"><i style="width:${lo * 10}%"></i>${delta}</div></div>`;
+      })
       .join('');
     // every primary, grouped by weapon class (the group header is drawn by slotRow)
     const primaries: (Choice & { group: string })[] = PRIMARY_IDS.map((id) => ({
@@ -460,7 +479,7 @@ export class Menu {
       this.slotRow('camo', 'CAMO', camosFor(c.weapon), c.camo, pu, prim.name),
       `<div class="group-label">SECONDARY · ${secKills} KILLS</div>`,
       this.slotRow('secondary', 'SIDEARM', SECONDARIES, c.secondary, {}, sec.name),
-      this.slotRow('secAttach', 'ATTACHMENT', SEC_ATTACH, c.secAttach, su, sec.name, 'set', c.secondary === 'r357' ? 'The revolver takes no attachments.' : ''),
+      takesSecAttach(c.secondary) ? this.slotRow('secAttach', 'ATTACHMENT', SEC_ATTACH, c.secAttach, su, sec.name) : '',
       this.slotRow('secCamo', 'CAMO', camosFor(c.secondary), c.secCamo, su, sec.name),
       `<div class="group-label">EQUIPMENT & PERKS</div>`,
       this.slotRow('tactical', 'TACTICAL', TACTICALS, c.tactical, {}, ''),
@@ -554,13 +573,19 @@ export class Menu {
       ['prestige', 'PRESTIGE', BANNERS.filter((b) => b.prestige), (b) => `PRESTIGE ${b.prestige}`],
       ['challenge', 'CHALLENGE', BANNERS.filter((b) => b.challenge), () => 'LOCKED'],
     ];
-    const chips = groups
-      .map(([id, name, list]) => `<button type="button" class="fchip ${this.cardGroup === id ? 'on' : ''}" data-cgrp="${id}">${name} · ${list.filter(open).length}/${list.length}</button>`)
+    // every group starts folded; a header click opens it (only open groups are built)
+    const sections = groups
+      .map(([id, name, list, lockLabel]) => {
+        const isOpen = this.cardOpen.has(id);
+        const shown = this.cardsOwned ? list.filter(open) : list;
+        const body = isOpen
+          ? `<div class="banners small">${shown.map((b) => this.bannerCard(b, !open(b), p.banner === b.id, lockLabel(b))).join('') || '<div class="sub">Nothing unlocked here yet.</div>'}</div>`
+          : '';
+        const cur = list.find((b) => b.id === p.banner);
+        return `<button type="button" class="fold ${isOpen ? 'open' : ''}" data-cgrp="${id}"><span>${name} BANNERS</span><em>${cur ? `EQUIPPED · ${cur.name} · ` : ''}${list.filter(open).length} / ${list.length}</em><i>${isOpen ? '−' : '+'}</i></button>${body}`;
+      })
       .join('');
-    const [, , list, lockLabel] = groups.find(([id]) => id === this.cardGroup) ?? groups[0];
-    const shown = this.cardsOwned ? list.filter(open) : list;
-    return `<div class="fchips">${chips}<button type="button" class="fchip ${this.cardsOwned ? 'on' : ''}" data-cown="1">UNLOCKED ONLY</button></div>
-      <div class="banners ${this.cardGroup === 'challenge' ? 'cards' : ''}">${shown.map((b) => this.bannerCard(b, !open(b), p.banner === b.id, lockLabel(b))).join('') || '<div class="sub">Nothing unlocked here yet.</div>'}</div>`;
+    return `<div class="fchips"><button type="button" class="fchip ${this.cardsOwned ? 'on' : ''}" data-cown="1">UNLOCKED ONLY</button></div>${sections}`;
   }
 
   private challengesHtml() {
@@ -611,11 +636,11 @@ export class Menu {
     const p = this.ctx.game.profileData;
     const all = this.ctx.settings.unlockAll;
     const cls = Object.entries(WEAPON_CLASSES) as [WeaponClassId, (typeof WEAPON_CLASSES)[WeaponClassId]][];
-    const prisms = cls.filter(([id]) => hasMastery(p.weaponHeads, id)).length;
-    const signal = all || prisms === cls.length;
-    const top = `<div class="mastery ${signal ? 'got' : ''}">
-      <div class="mh"><i class="sw big" style="background:${DEAD_SIGNAL.swatch}"></i><div><b>DEAD SIGNAL</b>
-        <span>${signal ? 'UNLOCKED for every weapon.' : `Earn Prism in every class · ${prisms} / ${cls.length} CLASSES`}</span></div></div></div>`;
+    const mastered = cls.filter(([id]) => hasMastery(p.weaponHeads, id)).length;
+    const ultimate = all || mastered === cls.length;
+    const top = `<div class="mastery ${ultimate ? 'got' : ''}">
+      <div class="mh"><i class="sw big" style="background:${ULTIMATE_CAMO.swatch}"></i><div><b>${ULTIMATE_CAMO.name}</b>
+        <span>${ultimate ? 'UNLOCKED for every weapon.' : `Earn ${WEAPON_CLASSES.ar.camo.name} in every class · ${mastered} / ${cls.length} CLASSES`}</span></div></div></div>`;
     return top + cls
       .map(([id, wc]) => {
         const mastered = all || hasMastery(p.weaponHeads, id);
@@ -677,7 +702,7 @@ export class Menu {
         </div>
         <div>
           <div class="label" style="margin-top:0">CAMOS & MASTERY</div>
-          <div class="sub">Five camos per weapon from headshot kills (20, 50, 100, 200, 500), then Gold. Gold on every weapon in a class unlocks Prism for that class; Prism in every class unlocks Dead Signal.</div>
+          <div class="sub">Five camos per weapon from headshot kills (20, 50, 100, 200, 500), then Gold. Gold on every weapon in a class unlocks Dead Signal for that class; Dead Signal in every class unlocks Prism.</div>
           ${this.camoTrack()}
         </div>
       </div>
@@ -755,7 +780,7 @@ export class Menu {
       this.previewSide = 'primary';
     });
     pick('stab', (v) => (this.soldierTab = v as typeof this.soldierTab));
-    pick('cgrp', (v) => (this.cardGroup = v));
+    pick('cgrp', (v) => (this.cardOpen.has(v) ? this.cardOpen.delete(v) : this.cardOpen.add(v)));
     pick('cown', () => (this.cardsOwned = !this.cardsOwned));
     pick('op', (v) => {
       g.profileData.look.operator = v;
@@ -779,21 +804,27 @@ export class Menu {
     panel.querySelectorAll<HTMLElement>('[data-set][data-val]').forEach((b) =>
       b.addEventListener('click', () => {
         if (b.classList.contains('locked')) return;
-        const c = this.ctx.classes[this.editIndex] as unknown as Record<string, string>;
+        const cl = this.ctx.classes[this.editIndex];
+        const c = cl as unknown as Record<string, string>;
         const key = b.dataset.set!;
+        const memo = (cl.camos ??= {});
+        // each gun remembers its own camo; switching guns restores that gun's pick
+        if (key === 'weapon') memo[cl.weapon] = cl.camo;
+        if (key === 'secondary') memo[cl.secondary] = cl.secCamo;
         c[key] = b.dataset.val!;
-        if (c.secondary === 'r357') c.secAttach = 'none';
-        if (key === 'weapon') fixAttachments(this.ctx.classes[this.editIndex]);
-        // a new gun keeps its camo only if that camo is earned on the new gun too
+        if (key === 'camo') memo[cl.weapon] = cl.camo;
+        if (key === 'secCamo') memo[cl.secondary] = cl.secCamo;
+        if (!takesSecAttach(cl.secondary)) cl.secAttach = 'none';
+        if (key === 'weapon') fixAttachments(cl);
         if (key === 'weapon' || key === 'secondary') {
           const camoKey = key === 'weapon' ? 'camo' : 'secCamo';
           const w = c[key] as WeaponId;
-          const camo = camosFor(w).find((o) => o.id === c[camoKey]);
-          if (!camo || !isUnlocked(camo, this.ctxFor(this.weaponCtx(w)))) c[camoKey] = 'none';
+          const camo = camosFor(w).find((o) => o.id === (memo[w] ?? 'none'));
+          c[camoKey] = camo && isUnlocked(camo, this.ctxFor(this.weaponCtx(w))) ? camo.id : 'none';
         }
         saveClasses(this.ctx.classes);
         this.savedAt = performance.now();
-        this.openSlot = key === 'secondary' ? 'secondary' : null;
+        // the list stays open so you can compare options; the slot header closes it
         if (this.context === 'pause') g.setClass(this.editIndex, this.ctx.classes);
         rerender();
       }),
@@ -820,6 +851,45 @@ export class Menu {
       g.profileData.callsign = call.value.trim().toUpperCase().slice(0, 16) || 'OPERATOR';
       g.saveProfileNow();
       rerender();
+    });
+
+    // save data
+    const saveMsg = (t: string) => {
+      const el = panel.querySelector('#save-msg');
+      if (el) el.textContent = t;
+    };
+    const importText = (text: string) => {
+      const snap = parseCode(text);
+      if (typeof snap === 'string') return saveMsg(snap);
+      if (!this.importArmed) {
+        this.importArmed = true;
+        return saveMsg(`Save from ${new Date(snap.at).toLocaleString()} found. Press import again to replace this browser's progress.`);
+      }
+      applySnapshot(snap);
+      saveMsg('Imported. Reloading…');
+      setTimeout(() => location.reload(), 600);
+    };
+    panel.querySelectorAll<HTMLElement>('[data-save]').forEach((b) =>
+      b.addEventListener('click', () => {
+        g.sfx.uiSelect();
+        const act = b.dataset.save;
+        if (act === 'copy') {
+          const code = exportCode();
+          const ta = panel.querySelector('#save-code') as HTMLTextAreaElement;
+          ta.value = code;
+          ta.select();
+          navigator.clipboard?.writeText(code).then(() => saveMsg('Save code copied. Keep it somewhere safe.'), () => saveMsg('Select the code above and copy it.'));
+        }
+        if (act === 'file') downloadSave();
+        if (act === 'import') importText((panel.querySelector('#save-code') as HTMLTextAreaElement).value);
+      }),
+    );
+    panel.querySelector('#save-file')?.addEventListener('change', (e) => {
+      const f = (e.target as HTMLInputElement).files?.[0];
+      if (f) void f.text().then((t) => {
+        (panel.querySelector('#save-code') as HTMLTextAreaElement).value = t.trim();
+        importText(t);
+      });
     });
 
     // settings

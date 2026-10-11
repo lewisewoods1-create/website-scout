@@ -2,18 +2,18 @@ import { Game, type MatchConfig, type Settings } from './game';
 import { Menu } from './menu';
 import { loadClasses } from './loadout';
 import { startBadgeAnimation } from './badges';
+import { readSave, requestPersistence, writeSave, SAVE_KEYS } from './save';
 
-const SETTINGS_KEY = 'deadpixel.settings.v1';
 const defaults: Settings = { sensitivity: 1, fov: 80, dither: true, lowHeight: 480, volume: 0.7, music: 0.5, unlockAll: false };
 
 function loadSettings(): Settings {
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings> & { v?: number };
+    const saved = readSave<Partial<Settings> & { v?: number }>(SAVE_KEYS.settings) ?? {};
     // v2: default world resolution raised to 480p
     if ((saved.v ?? 1) < 2) {
       delete saved.lowHeight;
       saved.v = 2;
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(saved));
+      writeSave(SAVE_KEYS.settings, saved);
     }
     return { ...defaults, ...saved };
   } catch {
@@ -24,6 +24,7 @@ function loadSettings(): Settings {
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const boot = document.getElementById('boot') as HTMLDivElement;
 const settings = loadSettings();
+void requestPersistence();
 const classes = loadClasses();
 const t0 = performance.now();
 const game = new Game(canvas, settings);
@@ -33,11 +34,7 @@ const debug = new URLSearchParams(location.search).has('debug');
 game.input.forceActive = debug;
 
 function saveSettings() {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, v: 2 }));
-  } catch {
-    // ignore
-  }
+  writeSave(SAVE_KEYS.settings, { ...settings, v: 2 });
   game.applySettings();
 }
 

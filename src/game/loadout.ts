@@ -1,7 +1,8 @@
 import { camoSwatch, type CamoId } from './camos';
+import { readSave, writeSave, SAVE_KEYS } from './save';
 
 export type PrimaryId = 'kr4' | 'vk47' | 'vx9' | 'sp45' | 'lm5' | 'pk7' | 'kestrel' | 'warden' | 'talon' | 'vulture' | 'mk20' | 'sk10';
-export type SecondaryId = 'p9' | 'r357';
+export type SecondaryId = 'p9' | 'r357' | 'mp18' | 'd50';
 export type WeaponId = PrimaryId | SecondaryId;
 export type OpticId = 'iron' | 'reflex' | 'holo' | 'acog' | 'sniper';
 export type MuzzleId = 'none' | 'comp' | 'suppressor';
@@ -9,9 +10,9 @@ export type UnderId = 'none' | 'grip' | 'angled' | 'laser';
 export type MagId = 'std' | 'ext' | 'fast';
 export type SecAttachId = 'none' | 'suppressor' | 'extmag';
 export type TacticalId = 'smoke' | 'stun';
-export type Perk1 = 'fleet' | 'pockets';
-export type Perk2 = 'hardhitter' | 'tough';
-export type Perk3 = 'steady' | 'quickhands';
+export type Perk1 = 'fleet' | 'pockets' | 'scavenger';
+export type Perk2 = 'hardhitter' | 'tough' | 'flak';
+export type Perk3 = 'steady' | 'quickhands' | 'quickdraw';
 
 export interface Loadout {
   name: string;
@@ -28,6 +29,8 @@ export interface Loadout {
   perk1: Perk1;
   perk2: Perk2;
   perk3: Perk3;
+  /** the camo last picked for each weapon, restored when that weapon is picked again */
+  camos?: Partial<Record<WeaponId, CamoId>>;
 }
 
 export type WeaponClassId = 'ar' | 'smg' | 'heavy' | 'sniper' | 'marksman' | 'handgun';
@@ -42,6 +45,8 @@ export interface WeaponBase {
   level?: number;
   /** bolt-action: the bolt is cycled after every shot */
   bolt?: boolean;
+  /** sidearms that take no attachments (the revolver) */
+  noAttach?: boolean;
   /** head multiplier on top of the base damage (sniper-class guns use `lethal` instead) */
   headMult: number;
   /** sniper rule: these damage values per zone ignore range falloff */
@@ -101,58 +106,58 @@ export const WEAPONS: Record<WeaponId, WeaponBase> = {
   sp45: {
     id: 'sp45', slot: 'primary', cls: 'smg', name: 'SP-45 RATTLER', blurb: '.45 SMG. Slower than the Stinger but every round lands heavy.',
     auto: true, rpm: 720, dmgNear: 33, dmgFar: 19, rangeNear: 11, rangeFar: 28, mag: 25, extMag: 40, reserveMags: 4,
-    reload: 2.0, reloadEmpty: 2.4, recoil: 1.4, hipSpread: 0.75, headMult: 1.25, move: 1.05, ads: 0.19, kickV: 0.009, kickH: 0.005, drift: -0.15, level: 6,
+    reload: 2.0, reloadEmpty: 2.4, recoil: 1.4, hipSpread: 0.75, headMult: 1.25, move: 1.05, ads: 0.19, kickV: 0.009, kickH: 0.005, drift: -0.15, level: 9,
     bars: { damage: 5, rate: 7, range: 3, control: 5, mobility: 9 },
   },
   // ---- heavy (LMGs): big damage and big mags, hard to control, slow
   lm5: {
     id: 'lm5', slot: 'primary', cls: 'heavy', name: 'LM-5 BRUTE', blurb: '5.56 belt-fed LMG. A 100-round wall of lead.',
     auto: true, rpm: 760, dmgNear: 40, dmgFar: 30, rangeNear: 30, rangeFar: 65, mag: 100, extMag: 150, reserveMags: 2,
-    reload: 5.6, reloadEmpty: 6.2, recoil: 1.8, hipSpread: 1.5, headMult: 1.3, move: 0.88, ads: 0.42, kickV: 0.011, kickH: 0.006, drift: 0.2, level: 10,
+    reload: 5.6, reloadEmpty: 6.2, recoil: 1.8, hipSpread: 1.5, headMult: 1.3, move: 0.88, ads: 0.42, kickV: 0.011, kickH: 0.006, drift: 0.2, level: 13,
     bars: { damage: 7, rate: 8, range: 8, control: 2, mobility: 3 },
   },
   pk7: {
     id: 'pk7', slot: 'primary', cls: 'heavy', name: 'PK-7 ANVIL', blurb: '7.62 machine gun. Two hits from anywhere, if you can hold it on target.',
     auto: true, rpm: 650, dmgNear: 50, dmgFar: 40, rangeNear: 35, rangeFar: 70, mag: 100, extMag: 150, reserveMags: 2,
-    reload: 6.0, reloadEmpty: 6.6, recoil: 2.25, hipSpread: 1.7, headMult: 1.3, move: 0.85, ads: 0.48, kickV: 0.015, kickH: 0.008, drift: -0.3, level: 26,
+    reload: 6.0, reloadEmpty: 6.6, recoil: 2.25, hipSpread: 1.7, headMult: 1.3, move: 0.85, ads: 0.48, kickV: 0.015, kickH: 0.008, drift: -0.3, level: 36,
     bars: { damage: 10, rate: 6, range: 9, control: 1, mobility: 2 },
   },
   // ---- snipers: bolt-actions and 5-round semi-autos
   kestrel: {
     id: 'kestrel', slot: 'primary', cls: 'sniper', name: 'KESTREL', blurb: 'Light .308 bolt-action. Quick to aim and quick to cycle.',
     auto: false, rpm: 58, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 7, reserveMags: 5,
-    reload: 2.8, reloadEmpty: 3.3, recoil: 2.6, hipSpread: 3.2, headMult: 1, move: 0.93, ads: 0.38, kickV: 0.09, kickH: 0.01, drift: 0.2, level: 4, bolt: true, lethal: SNIPER_LETHAL,
+    reload: 2.8, reloadEmpty: 3.3, recoil: 2.6, hipSpread: 3.2, headMult: 1, move: 0.93, ads: 0.38, kickV: 0.09, kickH: 0.01, drift: 0.2, level: 5, bolt: true, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 2, range: 10, control: 4, mobility: 5 },
   },
   warden: {
     id: 'warden', slot: 'primary', cls: 'sniper', name: 'WARDEN .338', blurb: 'Heavy .338 bolt-action. Slowest to handle, punches through two targets.',
     auto: false, rpm: 44, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 7, reserveMags: 5,
-    reload: 3.4, reloadEmpty: 3.9, recoil: 3.2, hipSpread: 3.6, headMult: 1, move: 0.9, ads: 0.48, kickV: 0.12, kickH: 0.015, drift: 0.25, level: 20, bolt: true, lethal: SNIPER_LETHAL,
+    reload: 3.4, reloadEmpty: 3.9, recoil: 3.2, hipSpread: 3.6, headMult: 1, move: 0.9, ads: 0.48, kickV: 0.12, kickH: 0.015, drift: 0.25, level: 28, bolt: true, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 1, range: 10, control: 3, mobility: 4 },
   },
   talon: {
     id: 'talon', slot: 'primary', cls: 'sniper', name: 'TALON SR', blurb: 'Semi-auto 7.62 sniper. Five rounds, no bolt to work.',
     auto: false, rpm: 170, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 8, reserveMags: 5,
-    reload: 2.7, reloadEmpty: 3.2, recoil: 2.8, hipSpread: 3.3, headMult: 1, move: 0.92, ads: 0.4, kickV: 0.07, kickH: 0.012, drift: 0.15, level: 14, lethal: SNIPER_LETHAL,
+    reload: 2.7, reloadEmpty: 3.2, recoil: 2.8, hipSpread: 3.3, headMult: 1, move: 0.92, ads: 0.4, kickV: 0.07, kickH: 0.012, drift: 0.15, level: 22, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 3, range: 9, control: 3, mobility: 5 },
   },
   vulture: {
     id: 'vulture', slot: 'primary', cls: 'sniper', name: 'VULTURE', blurb: 'Bullpup semi-auto sniper. Five rounds, fastest follow-up shot.',
     auto: false, rpm: 200, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 8, reserveMags: 5,
-    reload: 2.5, reloadEmpty: 3.0, recoil: 3.0, hipSpread: 3.1, headMult: 1, move: 0.94, ads: 0.36, kickV: 0.08, kickH: 0.012, drift: -0.1, level: 34, lethal: SNIPER_LETHAL,
+    reload: 2.5, reloadEmpty: 3.0, recoil: 3.0, hipSpread: 3.1, headMult: 1, move: 0.94, ads: 0.36, kickV: 0.08, kickH: 0.012, drift: -0.1, level: 46, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 4, range: 9, control: 2, mobility: 6 },
   },
   // ---- marksman rifles: semi-auto, two to three hits
   sk10: {
     id: 'sk10', slot: 'primary', cls: 'marksman', name: 'SK-10 RANGER', blurb: '7.62 semi-auto carbine with a wooden stock. Two to the head, three to the body.',
     auto: false, rpm: 360, dmgNear: 46, dmgFar: 40, rangeNear: 35, rangeFar: 75, mag: 10, extMag: 20, reserveMags: 5,
-    reload: 2.2, reloadEmpty: 2.7, recoil: 1.6, hipSpread: 1.4, headMult: 1.6, move: 0.98, ads: 0.3, kickV: 0.03, kickH: 0.008, drift: 0.2, level: 2,
+    reload: 2.2, reloadEmpty: 2.7, recoil: 1.6, hipSpread: 1.4, headMult: 1.6, move: 0.98, ads: 0.3, kickV: 0.03, kickH: 0.008, drift: 0.2, level: 3,
     bars: { damage: 7, rate: 5, range: 8, control: 6, mobility: 7 },
   },
   mk20: {
     id: 'mk20', slot: 'primary', cls: 'marksman', name: 'MK-20 SENTINEL', blurb: 'Battle rifle in a chassis. Two body shots close, three far.',
     auto: false, rpm: 300, dmgNear: 55, dmgFar: 42, rangeNear: 30, rangeFar: 70, mag: 20, extMag: 30, reserveMags: 4,
-    reload: 2.5, reloadEmpty: 3.0, recoil: 1.9, hipSpread: 1.5, headMult: 1.6, move: 0.96, ads: 0.33, kickV: 0.04, kickH: 0.01, drift: 0.3, level: 8,
+    reload: 2.5, reloadEmpty: 3.0, recoil: 1.9, hipSpread: 1.5, headMult: 1.6, move: 0.96, ads: 0.33, kickV: 0.04, kickH: 0.01, drift: 0.3, level: 17,
     bars: { damage: 8, rate: 4, range: 9, control: 5, mobility: 6 },
   },
   // ---- handguns
@@ -165,8 +170,20 @@ export const WEAPONS: Record<WeaponId, WeaponBase> = {
   r357: {
     id: 'r357', slot: 'secondary', cls: 'handgun', name: 'R-357 MAGNUM', blurb: '.357 revolver. Two to the body.',
     auto: false, rpm: 170, dmgNear: 72, dmgFar: 50, rangeNear: 15, rangeFar: 40, mag: 6, extMag: 6, reserveMags: 5,
-    reload: 2.6, reloadEmpty: 2.6, recoil: 2.4, hipSpread: 1, headMult: 1.35, move: 1.05, ads: 0.18, kickV: 0.05, kickH: 0.012, drift: 0.3,
+    reload: 2.6, reloadEmpty: 2.6, recoil: 2.4, hipSpread: 1, headMult: 1.35, move: 1.05, ads: 0.18, kickV: 0.05, kickH: 0.012, drift: 0.3, level: 7, noAttach: true,
     bars: { damage: 10, rate: 2, range: 5, control: 3, mobility: 9 },
+  },
+  mp18: {
+    id: 'mp18', slot: 'secondary', cls: 'handgun', name: 'MP-18 HORNET', blurb: 'Machine pistol. Full-auto 9mm for when the primary runs dry.',
+    auto: true, rpm: 950, dmgNear: 24, dmgFar: 14, rangeNear: 8, rangeFar: 22, mag: 20, extMag: 30, reserveMags: 4,
+    reload: 1.7, reloadEmpty: 2.1, recoil: 1.3, hipSpread: 0.9, headMult: 1.3, move: 1.04, ads: 0.17, kickV: 0.008, kickH: 0.007, drift: -0.2, level: 38,
+    bars: { damage: 3, rate: 10, range: 2, control: 4, mobility: 9 },
+  },
+  d50: {
+    id: 'd50', slot: 'secondary', cls: 'handgun', name: 'D-50 HAMMER', blurb: '.50 heavy pistol. Two to the body at any pistol range.',
+    auto: false, rpm: 200, dmgNear: 70, dmgFar: 58, rangeNear: 18, rangeFar: 45, mag: 7, extMag: 10, reserveMags: 4,
+    reload: 2.0, reloadEmpty: 2.4, recoil: 2.6, hipSpread: 1.1, headMult: 1.4, move: 1.02, ads: 0.2, kickV: 0.06, kickH: 0.014, drift: 0.25, level: 58,
+    bars: { damage: 10, rate: 2, range: 6, control: 2, mobility: 8 },
   },
 };
 
@@ -184,7 +201,7 @@ export interface Choice<T extends string = string> {
   heads?: number;
   /** mastery camo: needs gold on every weapon in this class */
   mastery?: WeaponClassId;
-  /** Dead Signal: needs Prism in every class */
+  /** Prism: needs the class mastery camo in every class */
   ultimate?: boolean;
   /** attachment only fits these weapon classes (default: all) */
   classes?: WeaponClassId[];
@@ -214,36 +231,40 @@ export const MAGS: Choice<MagId>[] = [
   { id: 'ext', name: 'EXTENDED MAG', desc: 'More ammo. Slower reload, aim and movement.', kills: 30 },
   { id: 'fast', name: 'DUAL MAG', desc: 'Taped mags. 25% faster reload, slightly slower aim.', kills: 70 },
 ];
-export const SECONDARIES: Choice<SecondaryId>[] = [
-  { id: 'p9', name: 'P-9 SERVICE', desc: '9mm pistol, 15 rounds.' },
-  { id: 'r357', name: 'R-357 MAGNUM', desc: '.357 revolver, 6 rounds.', level: 4 },
-];
+export const SECONDARIES: Choice<SecondaryId>[] = (['p9', 'r357', 'mp18', 'd50'] as SecondaryId[]).map((id) => ({
+  id, name: WEAPONS[id].name, desc: WEAPONS[id].blurb, level: WEAPONS[id].level,
+}));
+/** Sidearm attachments fit every sidearm except the revolver. */
+export const takesSecAttach = (w: SecondaryId) => !WEAPONS[w].noAttach;
 export const SEC_ATTACH: Choice<SecAttachId>[] = [
   { id: 'none', name: 'NONE', desc: '' },
-  { id: 'suppressor', name: 'SUPPRESSOR', desc: 'Pistol only. Off the radar.', kills: 10 },
-  { id: 'extmag', name: 'EXTENDED MAG', desc: 'Pistol only. 21 rounds.', kills: 20 },
+  { id: 'suppressor', name: 'SUPPRESSOR', desc: 'Off the radar. Less damage at range, slower to aim.', kills: 10 },
+  { id: 'extmag', name: 'EXTENDED MAG', desc: 'More rounds. Slower reload and aim.', kills: 20 },
 ];
 export const TACTICALS: Choice<TacticalId>[] = [
   { id: 'smoke', name: 'SMOKE', desc: 'Blocks vision for 14 seconds.' },
-  { id: 'stun', name: 'STUN', desc: 'Dazes enemies within 10m for 3.5s.', level: 6 },
+  { id: 'stun', name: 'STUN', desc: 'Dazes enemies within 10m for 3.5s.', level: 14 },
 ];
 export const PERKS1: Choice<Perk1>[] = [
   { id: 'fleet', name: 'FLEET FOOT', desc: 'Move 10% faster.' },
-  { id: 'pockets', name: 'DEEP POCKETS', desc: '2 extra mags and an extra frag.' },
+  { id: 'pockets', name: 'DEEP POCKETS', desc: '2 extra mags and an extra frag.', level: 11 },
+  { id: 'scavenger', name: 'SCAVENGER', desc: 'Every kill refills a magazine of reserve ammo for the gun you used.', level: 40 },
 ];
 export const PERKS2: Choice<Perk2>[] = [
   { id: 'hardhitter', name: 'HARD HITTER', desc: '+20% bullet damage.' },
-  { id: 'tough', name: 'THICK SKIN', desc: '+30 max health.', level: 8 },
+  { id: 'tough', name: 'THICK SKIN', desc: '+30 max health.', level: 19 },
+  { id: 'flak', name: 'FLAK JACKET', desc: 'Take 45% less damage from explosions and killstreaks.', level: 32 },
 ];
 export const PERKS3: Choice<Perk3>[] = [
   { id: 'steady', name: 'STEADY HANDS', desc: '35% tighter hip-fire.' },
-  { id: 'quickhands', name: 'QUICK HANDS', desc: '30% faster reloads.', level: 3 },
+  { id: 'quickhands', name: 'QUICK HANDS', desc: '30% faster reloads.', level: 6 },
+  { id: 'quickdraw', name: 'QUICKDRAW', desc: 'Aim down sights 30% faster.', level: 52 },
 ];
 // ---------------------------------------------------------------- camos
 
 /**
  * Camos from the overlay pack, per weapon: five from headshot kills, Gold once all five
- * are done, Prism for gold on every weapon in the class, Dead Signal for Prism in every class.
+ * are done, Dead Signal for gold on every weapon in the class, Prism for Dead Signal in every class.
  */
 const cm = (id: CamoId, name: string, extra: Partial<Choice<CamoId>> = {}): Choice<CamoId> => ({ id, name, desc: '', swatch: camoSwatch(id), ...extra });
 export const CAMOS: Choice<CamoId>[] = [
@@ -260,28 +281,28 @@ export const GOLD_HEADS = 500;
 const inClass = (c: WeaponClassId) => (Object.keys(WEAPONS) as WeaponId[]).filter((w) => WEAPONS[w].cls === c);
 
 export const WEAPON_CLASSES: Record<WeaponClassId, { name: string; short: string; weapons: WeaponId[]; camo: Choice<CamoId> }> = {
-  ar: { name: 'ASSAULT RIFLES', short: 'ASSAULT', weapons: inClass('ar'), camo: cm('prism', 'PRISM', { desc: 'Gold on every assault rifle.', mastery: 'ar' }) },
-  smg: { name: 'SMGS', short: 'SMG', weapons: inClass('smg'), camo: cm('prism', 'PRISM', { desc: 'Gold on every SMG.', mastery: 'smg' }) },
-  heavy: { name: 'HEAVY', short: 'HEAVY', weapons: inClass('heavy'), camo: cm('prism', 'PRISM', { desc: 'Gold on every heavy weapon.', mastery: 'heavy' }) },
-  sniper: { name: 'SNIPERS', short: 'SNIPER', weapons: inClass('sniper'), camo: cm('prism', 'PRISM', { desc: 'Gold on every sniper.', mastery: 'sniper' }) },
-  marksman: { name: 'MARKSMAN RIFLES', short: 'MARKSMAN', weapons: inClass('marksman'), camo: cm('prism', 'PRISM', { desc: 'Gold on every marksman rifle.', mastery: 'marksman' }) },
-  handgun: { name: 'HANDGUNS', short: 'HANDGUN', weapons: inClass('handgun'), camo: cm('prism', 'PRISM', { desc: 'Gold on every handgun.', mastery: 'handgun' }) },
+  ar: { name: 'ASSAULT RIFLES', short: 'ASSAULT', weapons: inClass('ar'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every assault rifle.', mastery: 'ar' }) },
+  smg: { name: 'SMGS', short: 'SMG', weapons: inClass('smg'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every SMG.', mastery: 'smg' }) },
+  heavy: { name: 'HEAVY', short: 'HEAVY', weapons: inClass('heavy'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every heavy weapon.', mastery: 'heavy' }) },
+  sniper: { name: 'SNIPERS', short: 'SNIPER', weapons: inClass('sniper'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every sniper.', mastery: 'sniper' }) },
+  marksman: { name: 'MARKSMAN RIFLES', short: 'MARKSMAN', weapons: inClass('marksman'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every marksman rifle.', mastery: 'marksman' }) },
+  handgun: { name: 'HANDGUNS', short: 'HANDGUN', weapons: inClass('handgun'), camo: cm('dead_signal', 'DEAD SIGNAL', { desc: 'Gold on every handgun.', mastery: 'handgun' }) },
 };
 
-/** The top camo: Prism earned in every weapon class. */
-export const DEAD_SIGNAL: Choice<CamoId> = cm('dead_signal', 'DEAD SIGNAL', { desc: 'Prism in every weapon class.', ultimate: true });
+/** The top camo: Prism, for Dead Signal earned in every weapon class. */
+export const ULTIMATE_CAMO: Choice<CamoId> = cm('prism', 'PRISM', { desc: 'Dead Signal in every weapon class.', ultimate: true });
 
 export function classOf(w: WeaponId): WeaponClassId {
   return WEAPONS[w].cls;
 }
 
 export function camosFor(w: WeaponId): Choice<CamoId>[] {
-  return [...CAMOS, WEAPON_CLASSES[classOf(w)].camo, DEAD_SIGNAL];
+  return [...CAMOS, WEAPON_CLASSES[classOf(w)].camo, ULTIMATE_CAMO];
 }
 
 export const hasGold = (heads: Record<string, number>, w: WeaponId) => (heads[w] ?? 0) >= GOLD_HEADS;
 export const hasMastery = (heads: Record<string, number>, c: WeaponClassId) => WEAPON_CLASSES[c].weapons.every((w) => hasGold(heads, w));
-export const hasDeadSignal = (heads: Record<string, number>) => (Object.keys(WEAPON_CLASSES) as WeaponClassId[]).every((c) => hasMastery(heads, c));
+export const hasAllMasteries = (heads: Record<string, number>) => (Object.keys(WEAPON_CLASSES) as WeaponClassId[]).every((c) => hasMastery(heads, c));
 
 export interface UnlockCtx {
   level: number;
@@ -296,13 +317,13 @@ export interface UnlockCtx {
 
 export function isUnlocked(c: Choice, ctx: UnlockCtx) {
   if (ctx.all) return true;
-  if (c.ultimate) return hasDeadSignal(ctx.allHeads ?? {});
+  if (c.ultimate) return hasAllMasteries(ctx.allHeads ?? {});
   if (c.mastery) return hasMastery(ctx.allHeads ?? {}, c.mastery);
   return (c.level ?? 1) <= ctx.level && (c.kills ?? 0) <= ctx.kills && (c.heads ?? 0) <= (ctx.heads ?? 0);
 }
 
 export function lockText(c: Choice, weaponName: string) {
-  if (c.ultimate) return 'PRISM IN EVERY CLASS';
+  if (c.ultimate) return 'DEAD SIGNAL IN EVERY CLASS';
   if (c.mastery) return `GOLD ON ALL ${WEAPON_CLASSES[c.mastery].name}`;
   if (c.heads) return `${c.heads} HEADSHOT KILLS WITH ${weaponName}`;
   if (c.kills) return `${c.kills} KILLS WITH ${weaponName}`;
@@ -333,28 +354,40 @@ export const cacUnlocked = (level: number, all = false) => all || level >= CAC_L
 /** Premade classes used before Create a Class unlocks (fresh copies, never edited). */
 export const premadeClasses = () => DEFAULT_CLASSES.slice(0, 3).map((c) => ({ ...c }));
 
-const KEY = 'deadpixel.classes.v1';
 
 export function loadClasses(): Loadout[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const arr = JSON.parse(raw) as Loadout[];
-      // older saves had three classes: pad up to five
-      if (Array.isArray(arr) && arr.length >= 3) return DEFAULT_CLASSES.map((d, i) => ({ ...d, ...(arr[i] ?? {}) }));
-    }
-  } catch {
-    // fall through to defaults
-  }
+  const arr = readSave<Loadout[]>(SAVE_KEYS.classes);
+  // older saves had three classes: pad up to five
+  if (Array.isArray(arr) && arr.length >= 3) return DEFAULT_CLASSES.map((d, i) => ({ ...d, ...(arr[i] ?? {}) }));
   return DEFAULT_CLASSES.map((c) => ({ ...c }));
 }
 
 export function saveClasses(c: Loadout[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(c));
-  } catch {
-    // ignore
-  }
+  writeSave(SAVE_KEYS.classes, c);
+}
+
+/**
+ * Menu bars (0-10) after attachments: the weapon's factory bars, nudged by how much the
+ * attachments change range damage, recoil and handling compared with factory parts.
+ */
+export function liveBars(l: Loadout, slot: 'primary' | 'secondary') {
+  const w = WEAPONS[slot === 'primary' ? l.weapon : l.secondary];
+  const factory: Loadout = slot === 'primary'
+    ? { ...l, optic: fitsWeapon(OPTICS, l.weapon)[0].id, muzzle: 'none', under: 'none', mag: 'std' }
+    : { ...l, secAttach: 'none' };
+  const a = computeStats({ ...factory, perk1: 'fleet', perk2: 'tough', perk3: 'steady' }, slot);
+  const b = computeStats({ ...l, perk1: 'fleet', perk2: 'tough', perk3: 'steady' }, slot);
+  const clamp = (v: number) => Math.max(0, Math.min(10, v));
+  const kick = (s: GunStats) => s.kickV + s.kickH * 0.8;
+  const bars = { ...w.bars };
+  const now = {
+    damage: bars.damage,
+    rate: bars.rate,
+    range: clamp(bars.range * (b.damageAt(60) / a.damageAt(60))),
+    control: clamp(bars.control * Math.pow(kick(a) / kick(b), 1.4)),
+    mobility: clamp(bars.mobility * (b.move / a.move) * Math.pow(a.adsTime / b.adsTime, 0.8)),
+  };
+  return { base: bars, now };
 }
 
 /** Final numbers the game uses once attachments and perks are applied. */
@@ -403,6 +436,30 @@ export function fitsWeapon<T extends string>(list: Choice<T>[], w: WeaponId): Ch
   return list.filter((c) => !c.classes || c.classes.includes(WEAPONS[w].cls));
 }
 
+/**
+ * Swap anything a class uses that the player's level hasn't unlocked yet (weapons,
+ * sidearms, tactical, perks) for the starting options. Used when unlock levels change.
+ */
+export function enforceLevelUnlocks(l: Loadout, level: number): Loadout {
+  const out = { ...l };
+  const locked = (c: Choice | undefined) => !!c && (c.level ?? 1) > level;
+  if ((WEAPONS[out.weapon].level ?? 1) > level) {
+    out.weapon = 'kr4';
+    out.camo = 'none';
+    fixAttachments(out);
+  }
+  if ((WEAPONS[out.secondary].level ?? 1) > level) {
+    out.secondary = 'p9';
+    out.secCamo = 'none';
+  }
+  if (!takesSecAttach(out.secondary)) out.secAttach = 'none';
+  if (locked(TACTICALS.find((t) => t.id === out.tactical))) out.tactical = 'smoke';
+  if (locked(PERKS1.find((t) => t.id === out.perk1))) out.perk1 = 'fleet';
+  if (locked(PERKS2.find((t) => t.id === out.perk2))) out.perk2 = 'hardhitter';
+  if (locked(PERKS3.find((t) => t.id === out.perk3))) out.perk3 = 'steady';
+  return out;
+}
+
 /** Snap a class's attachments onto ones its (possibly new) primary accepts. */
 export function fixAttachments(l: Loadout) {
   const ok = <T extends string>(list: Choice<T>[], v: T) => fitsWeapon(list, l.weapon).some((c) => c.id === v);
@@ -413,7 +470,7 @@ export function fixAttachments(l: Loadout) {
 export function computeStats(l: Loadout, slot: 'primary' | 'secondary' = 'primary'): GunStats {
   const secondary = slot === 'secondary';
   const w = WEAPONS[secondary ? l.secondary : l.weapon];
-  const pistol = w.id === 'p9';
+  const pistol = !w.noAttach;
   const muzzle: MuzzleId = secondary ? (pistol && l.secAttach === 'suppressor' ? 'suppressor' : 'none') : l.muzzle;
   const mag: MagId = secondary ? (pistol && l.secAttach === 'extmag' ? 'ext' : 'std') : l.mag;
   const optic: OpticId = secondary ? 'iron' : l.optic;
@@ -437,6 +494,7 @@ export function computeStats(l: Loadout, slot: 'primary' | 'secondary' = 'primar
   if (muzzle === 'suppressor') ads *= 1.06;
   if (mag === 'ext') { ads *= 1.1; move *= 0.97; }
   if (mag === 'fast') ads *= 1.04;
+  if (l.perk3 === 'quickdraw') ads *= 0.7;
   ads *= { iron: 0.96, reflex: 1, holo: 1.03, acog: 1.1, sniper: secondary ? 1 : w.cls === 'sniper' ? 1 : 1.15 }[optic];
   let hip = w.hipSpread * (l.perk3 === 'steady' ? 0.65 : 1);
   if (under === 'laser') hip *= 0.7;
