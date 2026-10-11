@@ -30,6 +30,26 @@ const LOOKS: Record<Exclude<CamoId, 'none'>, CamoLook> = {
   dead_signal: { metal: 0.35, rough: 0.35, animated: true, tile: 0.15 },
 };
 
+/** Every pack camo, in unlock order. */
+export const PACK_CAMOS: CamoId[] = ['grunt_grid', 'rubble', 'sand_tiger', 'frostbite', 'red_static', 'gold', 'prism', 'dead_signal'];
+
+const tileCache = new Map<CamoId, THREE.Texture>();
+/** The static seamless tile for a camo (uniforms use this, animated camos included). */
+export function camoTileTexture(id: CamoId): THREE.Texture {
+  let tex = tileCache.get(id);
+  if (!tex) {
+    tex = new THREE.TextureLoader().load(asset(`camos/${id}_tile.png`));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    if (id === 'grunt_grid' || id === 'red_static') {
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestMipmapNearestFilter;
+    }
+    tileCache.set(id, tex);
+  }
+  return tex;
+}
+
 /** Swatch for menus: the tile itself. */
 export const camoSwatch = (id: CamoId) => (id === 'none' ? '#1d1f21' : `url(${asset(`camos/${id}_tile.png`)}) center / 220%`);
 

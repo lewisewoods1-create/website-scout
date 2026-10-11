@@ -48,6 +48,13 @@ export interface WeaponBase {
   lethal?: Record<HitZone, number>;
   /** movement speed multiplier while holding it */
   move: number;
+  /** seconds to aim down sights with factory parts */
+  ads: number;
+  /** recoil per shot at the hip: vertical climb and horizontal wander (radians) */
+  kickV: number;
+  kickH: number;
+  /** horizontal bias of the recoil pattern (-1 left .. 1 right) */
+  drift: number;
   blurb: string;
   auto: boolean;
   rpm: number;
@@ -75,90 +82,90 @@ export const WEAPONS: Record<WeaponId, WeaponBase> = {
   kr4: {
     id: 'kr4', slot: 'primary', cls: 'ar', name: 'KR-4 CARBINE', blurb: '5.56 carbine. Fast, flat-shooting and easy to control.',
     auto: true, rpm: 780, dmgNear: 34, dmgFar: 22, rangeNear: 25, rangeFar: 50, mag: 30, extMag: 45, reserveMags: 4,
-    reload: 2.1, reloadEmpty: 2.6, recoil: 1, hipSpread: 1, headMult: STD_HEAD, move: 1,
+    reload: 2.1, reloadEmpty: 2.6, recoil: 1, hipSpread: 1, headMult: STD_HEAD, move: 1, ads: 0.24, kickV: 0.01, kickH: 0.004, drift: 0.35,
     bars: { damage: 5, rate: 8, range: 6, control: 8, mobility: 7 },
   },
   vk47: {
     id: 'vk47', slot: 'primary', cls: 'ar', name: 'VK-47 RIFLE', blurb: '7.62 rifle. Hits hard at any range, kicks like a mule.',
     auto: true, rpm: 600, dmgNear: 42, dmgFar: 30, rangeNear: 30, rangeFar: 60, mag: 30, extMag: 45, reserveMags: 4,
-    reload: 2.4, reloadEmpty: 2.9, recoil: 1.5, hipSpread: 1.15, headMult: STD_HEAD, move: 0.98,
+    reload: 2.4, reloadEmpty: 2.9, recoil: 1.5, hipSpread: 1.15, headMult: STD_HEAD, move: 0.98, ads: 0.27, kickV: 0.015, kickH: 0.007, drift: -0.25,
     bars: { damage: 8, rate: 6, range: 7, control: 4, mobility: 6 },
   },
   // ---- SMGs: very fast fire, heavy recoil, lower damage, quick on their feet
   vx9: {
     id: 'vx9', slot: 'primary', cls: 'smg', name: 'VX-9 STINGER', blurb: '4.6mm PDW. Shreds up close, climbs hard on full auto.',
     auto: true, rpm: 1000, dmgNear: 25, dmgFar: 15, rangeNear: 9, rangeFar: 24, mag: 40, extMag: 60, reserveMags: 4,
-    reload: 1.9, reloadEmpty: 2.3, recoil: 1.55, hipSpread: 0.7, headMult: 1.25, move: 1.07,
+    reload: 1.9, reloadEmpty: 2.3, recoil: 1.55, hipSpread: 0.7, headMult: 1.25, move: 1.07, ads: 0.17, kickV: 0.007, kickH: 0.006, drift: 0.1,
     bars: { damage: 3, rate: 10, range: 2, control: 4, mobility: 10 },
   },
   sp45: {
     id: 'sp45', slot: 'primary', cls: 'smg', name: 'SP-45 RATTLER', blurb: '.45 SMG. Slower than the Stinger but every round lands heavy.',
     auto: true, rpm: 720, dmgNear: 33, dmgFar: 19, rangeNear: 11, rangeFar: 28, mag: 25, extMag: 40, reserveMags: 4,
-    reload: 2.0, reloadEmpty: 2.4, recoil: 1.4, hipSpread: 0.75, headMult: 1.25, move: 1.05, level: 6,
+    reload: 2.0, reloadEmpty: 2.4, recoil: 1.4, hipSpread: 0.75, headMult: 1.25, move: 1.05, ads: 0.19, kickV: 0.009, kickH: 0.005, drift: -0.15, level: 6,
     bars: { damage: 5, rate: 7, range: 3, control: 5, mobility: 9 },
   },
   // ---- heavy (LMGs): big damage and big mags, hard to control, slow
   lm5: {
     id: 'lm5', slot: 'primary', cls: 'heavy', name: 'LM-5 BRUTE', blurb: '5.56 belt-fed LMG. A 100-round wall of lead.',
     auto: true, rpm: 760, dmgNear: 40, dmgFar: 30, rangeNear: 30, rangeFar: 65, mag: 100, extMag: 150, reserveMags: 2,
-    reload: 5.6, reloadEmpty: 6.2, recoil: 1.8, hipSpread: 1.5, headMult: 1.3, move: 0.88, level: 10,
+    reload: 5.6, reloadEmpty: 6.2, recoil: 1.8, hipSpread: 1.5, headMult: 1.3, move: 0.88, ads: 0.42, kickV: 0.011, kickH: 0.006, drift: 0.2, level: 10,
     bars: { damage: 7, rate: 8, range: 8, control: 2, mobility: 3 },
   },
   pk7: {
     id: 'pk7', slot: 'primary', cls: 'heavy', name: 'PK-7 ANVIL', blurb: '7.62 machine gun. Two hits from anywhere, if you can hold it on target.',
     auto: true, rpm: 650, dmgNear: 50, dmgFar: 40, rangeNear: 35, rangeFar: 70, mag: 100, extMag: 150, reserveMags: 2,
-    reload: 6.0, reloadEmpty: 6.6, recoil: 2.25, hipSpread: 1.7, headMult: 1.3, move: 0.85, level: 26,
+    reload: 6.0, reloadEmpty: 6.6, recoil: 2.25, hipSpread: 1.7, headMult: 1.3, move: 0.85, ads: 0.48, kickV: 0.015, kickH: 0.008, drift: -0.3, level: 26,
     bars: { damage: 10, rate: 6, range: 9, control: 1, mobility: 2 },
   },
   // ---- snipers: bolt-actions and 5-round semi-autos
   kestrel: {
     id: 'kestrel', slot: 'primary', cls: 'sniper', name: 'KESTREL', blurb: 'Light .308 bolt-action. Quick to aim and quick to cycle.',
     auto: false, rpm: 58, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 7, reserveMags: 5,
-    reload: 2.8, reloadEmpty: 3.3, recoil: 2.6, hipSpread: 3.2, headMult: 1, move: 0.93, level: 4, bolt: true, lethal: SNIPER_LETHAL,
+    reload: 2.8, reloadEmpty: 3.3, recoil: 2.6, hipSpread: 3.2, headMult: 1, move: 0.93, ads: 0.38, kickV: 0.09, kickH: 0.01, drift: 0.2, level: 4, bolt: true, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 2, range: 10, control: 4, mobility: 5 },
   },
   warden: {
     id: 'warden', slot: 'primary', cls: 'sniper', name: 'WARDEN .338', blurb: 'Heavy .338 bolt-action. Slowest to handle, punches through two targets.',
     auto: false, rpm: 44, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 7, reserveMags: 5,
-    reload: 3.4, reloadEmpty: 3.9, recoil: 3.2, hipSpread: 3.6, headMult: 1, move: 0.9, level: 20, bolt: true, lethal: SNIPER_LETHAL,
+    reload: 3.4, reloadEmpty: 3.9, recoil: 3.2, hipSpread: 3.6, headMult: 1, move: 0.9, ads: 0.48, kickV: 0.12, kickH: 0.015, drift: 0.25, level: 20, bolt: true, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 1, range: 10, control: 3, mobility: 4 },
   },
   talon: {
     id: 'talon', slot: 'primary', cls: 'sniper', name: 'TALON SR', blurb: 'Semi-auto 7.62 sniper. Five rounds, no bolt to work.',
     auto: false, rpm: 170, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 8, reserveMags: 5,
-    reload: 2.7, reloadEmpty: 3.2, recoil: 2.8, hipSpread: 3.3, headMult: 1, move: 0.92, level: 14, lethal: SNIPER_LETHAL,
+    reload: 2.7, reloadEmpty: 3.2, recoil: 2.8, hipSpread: 3.3, headMult: 1, move: 0.92, ads: 0.4, kickV: 0.07, kickH: 0.012, drift: 0.15, level: 14, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 3, range: 9, control: 3, mobility: 5 },
   },
   vulture: {
     id: 'vulture', slot: 'primary', cls: 'sniper', name: 'VULTURE', blurb: 'Bullpup semi-auto sniper. Five rounds, fastest follow-up shot.',
     auto: false, rpm: 200, dmgNear: 150, dmgFar: 150, rangeNear: 999, rangeFar: 1000, mag: 5, extMag: 8, reserveMags: 5,
-    reload: 2.5, reloadEmpty: 3.0, recoil: 3.0, hipSpread: 3.1, headMult: 1, move: 0.94, level: 34, lethal: SNIPER_LETHAL,
+    reload: 2.5, reloadEmpty: 3.0, recoil: 3.0, hipSpread: 3.1, headMult: 1, move: 0.94, ads: 0.36, kickV: 0.08, kickH: 0.012, drift: -0.1, level: 34, lethal: SNIPER_LETHAL,
     bars: { damage: 10, rate: 4, range: 9, control: 2, mobility: 6 },
   },
   // ---- marksman rifles: semi-auto, two to three hits
   sk10: {
     id: 'sk10', slot: 'primary', cls: 'marksman', name: 'SK-10 RANGER', blurb: '7.62 semi-auto carbine with a wooden stock. Two to the head, three to the body.',
     auto: false, rpm: 360, dmgNear: 46, dmgFar: 40, rangeNear: 35, rangeFar: 75, mag: 10, extMag: 20, reserveMags: 5,
-    reload: 2.2, reloadEmpty: 2.7, recoil: 1.6, hipSpread: 1.4, headMult: 1.6, move: 0.98, level: 2,
+    reload: 2.2, reloadEmpty: 2.7, recoil: 1.6, hipSpread: 1.4, headMult: 1.6, move: 0.98, ads: 0.3, kickV: 0.03, kickH: 0.008, drift: 0.2, level: 2,
     bars: { damage: 7, rate: 5, range: 8, control: 6, mobility: 7 },
   },
   mk20: {
     id: 'mk20', slot: 'primary', cls: 'marksman', name: 'MK-20 SENTINEL', blurb: 'Battle rifle in a chassis. Two body shots close, three far.',
     auto: false, rpm: 300, dmgNear: 55, dmgFar: 42, rangeNear: 30, rangeFar: 70, mag: 20, extMag: 30, reserveMags: 4,
-    reload: 2.5, reloadEmpty: 3.0, recoil: 1.9, hipSpread: 1.5, headMult: 1.6, move: 0.96, level: 8,
+    reload: 2.5, reloadEmpty: 3.0, recoil: 1.9, hipSpread: 1.5, headMult: 1.6, move: 0.96, ads: 0.33, kickV: 0.04, kickH: 0.01, drift: 0.3, level: 8,
     bars: { damage: 8, rate: 4, range: 9, control: 5, mobility: 6 },
   },
   // ---- handguns
   p9: {
     id: 'p9', slot: 'secondary', cls: 'handgun', name: 'P-9 SERVICE', blurb: '9mm striker pistol. Quick to draw, 15 rounds.',
     auto: false, rpm: 420, dmgNear: 38, dmgFar: 24, rangeNear: 12, rangeFar: 30, mag: 15, extMag: 21, reserveMags: 4,
-    reload: 1.5, reloadEmpty: 1.9, recoil: 0.9, hipSpread: 0.8, headMult: 1.4, move: 1.05,
+    reload: 1.5, reloadEmpty: 1.9, recoil: 0.9, hipSpread: 0.8, headMult: 1.4, move: 1.05, ads: 0.15, kickV: 0.018, kickH: 0.006, drift: 0.2,
     bars: { damage: 4, rate: 7, range: 3, control: 8, mobility: 10 },
   },
   r357: {
     id: 'r357', slot: 'secondary', cls: 'handgun', name: 'R-357 MAGNUM', blurb: '.357 revolver. Two to the body.',
     auto: false, rpm: 170, dmgNear: 72, dmgFar: 50, rangeNear: 15, rangeFar: 40, mag: 6, extMag: 6, reserveMags: 5,
-    reload: 2.6, reloadEmpty: 2.6, recoil: 2.4, hipSpread: 1, headMult: 1.35, move: 1.05,
+    reload: 2.6, reloadEmpty: 2.6, recoil: 2.4, hipSpread: 1, headMult: 1.35, move: 1.05, ads: 0.18, kickV: 0.05, kickH: 0.012, drift: 0.3,
     bars: { damage: 10, rate: 2, range: 5, control: 3, mobility: 9 },
   },
 };
@@ -193,19 +200,19 @@ export const OPTICS: Choice<OpticId>[] = [
 ];
 export const MUZZLES: Choice<MuzzleId>[] = [
   { id: 'none', name: 'FLASH HIDER', desc: 'Standard muzzle device.' },
-  { id: 'comp', name: 'COMPENSATOR', desc: '18% less vertical recoil.', kills: 15 },
-  { id: 'suppressor', name: 'SUPPRESSOR', desc: 'Off the radar when firing. Less damage at range.', kills: 35 },
+  { id: 'comp', name: 'COMPENSATOR', desc: '20% less vertical climb. Slightly slower to aim.', kills: 15 },
+  { id: 'suppressor', name: 'SUPPRESSOR', desc: 'Off the radar, no tracers or flash. Less damage at range, slower to aim.', kills: 35 },
 ];
 export const UNDERS: Choice<UnderId>[] = [
   { id: 'none', name: 'NONE', desc: 'Lightest setup.' },
-  { id: 'grip', name: 'VERTICAL GRIP', desc: '25% less recoil.', kills: 10, classes: ['ar', 'smg', 'heavy'] },
-  { id: 'angled', name: 'ANGLED GRIP', desc: '12% less recoil, steadier aim.', kills: 25, classes: ['ar', 'smg', 'heavy', 'marksman'] },
+  { id: 'grip', name: 'VERTICAL GRIP', desc: '28% less vertical climb. Slower to aim.', kills: 10, classes: ['ar', 'smg', 'heavy'] },
+  { id: 'angled', name: 'ANGLED GRIP', desc: '25% less side-to-side kick, 10% faster aim.', kills: 25, classes: ['ar', 'smg', 'heavy', 'marksman'] },
   { id: 'laser', name: 'LASER SIGHT', desc: '30% tighter hip-fire.', kills: 55 },
 ];
 export const MAGS: Choice<MagId>[] = [
   { id: 'std', name: 'STANDARD MAG', desc: 'Factory magazine.' },
-  { id: 'ext', name: 'EXTENDED MAG', desc: '+50% ammo, slower reload.', kills: 30 },
-  { id: 'fast', name: 'DUAL MAG', desc: 'Taped mags. 25% faster reload.', kills: 70 },
+  { id: 'ext', name: 'EXTENDED MAG', desc: 'More ammo. Slower reload, aim and movement.', kills: 30 },
+  { id: 'fast', name: 'DUAL MAG', desc: 'Taped mags. 25% faster reload, slightly slower aim.', kills: 70 },
 ];
 export const SECONDARIES: Choice<SecondaryId>[] = [
   { id: 'p9', name: 'P-9 SERVICE', desc: '9mm pistol, 15 rounds.' },
@@ -370,8 +377,16 @@ export interface GunStats {
   bolt: boolean;
   /** full-screen scope when aiming */
   scoped: boolean;
-  /** movement multiplier from the weapon's weight */
+  /** movement multiplier from the weapon's weight and attachments */
   move: number;
+  /** seconds to aim down sights */
+  adsTime: number;
+  /** per-shot recoil (radians) after attachments: vertical, horizontal, bias */
+  kickV: number;
+  kickH: number;
+  drift: number;
+  /** heavies climb harder the longer you hold the trigger */
+  escalate: boolean;
   /** body-shot damage at a distance (what the menus show) */
   damageAt(dist: number): number;
   /** damage for a hit on a given zone */
@@ -409,10 +424,20 @@ export function computeStats(l: Loadout, slot: 'primary' | 'secondary' = 'primar
   let reloadMul = l.perk3 === 'quickhands' ? 0.7 : 1;
   if (mag === 'ext') reloadMul *= 1.12;
   if (mag === 'fast') reloadMul *= 0.75;
+  // every attachment has an upside and a cost: recoil (vertical / horizontal), ADS time, movement
   let recoil = w.recoil;
-  if (under === 'grip') recoil *= 0.75;
-  if (under === 'angled') recoil *= 0.88;
-  if (muzzle === 'comp') recoil *= 0.82;
+  let kv = 1;
+  let kh = 1;
+  let ads = w.ads;
+  let move = w.move;
+  if (under === 'grip') { recoil *= 0.75; kv *= 0.72; kh *= 0.9; ads *= 1.06; }
+  if (under === 'angled') { recoil *= 0.88; kv *= 0.9; kh *= 0.75; ads *= 0.9; }
+  if (under === 'laser') ads *= 1.02;
+  if (muzzle === 'comp') { recoil *= 0.82; kv *= 0.8; kh *= 0.95; ads *= 1.04; }
+  if (muzzle === 'suppressor') ads *= 1.06;
+  if (mag === 'ext') { ads *= 1.1; move *= 0.97; }
+  if (mag === 'fast') ads *= 1.04;
+  ads *= { iron: 0.96, reflex: 1, holo: 1.03, acog: 1.1, sniper: secondary ? 1 : w.cls === 'sniper' ? 1 : 1.15 }[optic];
   let hip = w.hipSpread * (l.perk3 === 'steady' ? 0.65 : 1);
   if (under === 'laser') hip *= 0.7;
   const magSize = mag === 'ext' ? w.extMag : w.mag;
@@ -433,7 +458,12 @@ export function computeStats(l: Loadout, slot: 'primary' | 'secondary' = 'primar
     cls: w.cls,
     bolt: !!w.bolt,
     scoped: optic === 'sniper',
-    move: w.move,
+    move,
+    adsTime: ads,
+    kickV: w.kickV * kv,
+    kickH: w.kickH * kh,
+    drift: w.drift,
+    escalate: w.cls === 'heavy',
     damageAt,
     zoneDamage(zone: HitZone, dist: number) {
       if (w.lethal) return w.lethal[zone] * (muzzle === 'suppressor' && zone === 'limb' ? 0.9 : 1);

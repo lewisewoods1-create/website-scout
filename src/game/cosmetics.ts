@@ -1,7 +1,8 @@
 import type { Choice } from './loadout';
 import { MAX_LEVEL, xpForLevel, levelForXp, type Profile } from './progression';
 import { badgeImg, rankInfo } from './badges';
-import { CHALLENGES, cardArt } from './challenges';
+import { CHALLENGES, cardArt, statValue } from './challenges';
+import { camoSwatch, type CamoId } from './camos';
 import { asset } from './assets';
 
 /**
@@ -88,11 +89,48 @@ export const GEAR: Choice[] = [
   { id: 'ranger', name: 'RANGER GREEN', desc: '', swatch: '#4a4d3c' },
   { id: 'black', name: 'BLACK', desc: '', level: 14, swatch: '#222' },
 ];
-export const HEADGEAR: Choice[] = [
-  { id: 'nvg', name: 'HELMET + NVG', desc: 'Night vision flipped up.' },
-  { id: 'helmet', name: 'HELMET', desc: 'Clean high-cut helmet.' },
-  { id: 'boonie', name: 'BOONIE HAT', desc: 'Soft hat and headset.', level: 22 },
-];
+/** Operator camos: the weapon camo pack as uniform fabric, each earned from a challenge. */
+export interface UniformCamo extends Choice {
+  id: CamoId;
+  stat: string;
+  target: number;
+}
+export const UNIFORM_CAMOS: UniformCamo[] = (
+  [
+    ['grunt_grid', 'kills', 100, 'Get 100 kills.'],
+    ['rubble', 'wins', 10, 'Win 10 matches.'],
+    ['sand_tiger', 'headshots', 100, 'Get 100 headshot kills.'],
+    ['frostbite', 'streak5', 10, 'Get 5 kills in one life 10 times.'],
+    ['red_static', 'streak_kills', 50, 'Get 50 kills with killstreaks.'],
+    ['gold', 'best_match_kills', 30, 'Get 30 kills in one match.'],
+    ['prism', 'mvp', 15, 'Win a match as its top player 15 times.'],
+    ['dead_signal', 'crash_used', 3, 'Call in a System Crash 3 times.'],
+  ] as [CamoId, string, number, string][]
+).map(([id, stat, target, desc]) => ({ id, stat, target, desc, name: id.replace('_', ' ').toUpperCase(), swatch: camoSwatch(id) }));
+
+export function uniformProgress(c: UniformCamo, p: Profile, level: number) {
+  return Math.min(c.target, statValue(p, c.stat, level));
+}
+export function uniformUnlocked(id: string, p: Profile, level: number, all = false) {
+  const c = UNIFORM_CAMOS.find((u) => u.id === id);
+  if (c) return all || uniformProgress(c, p, level) >= c.target;
+  const base = UNIFORMS.find((u) => u.id === id);
+  return all || p.prestige > 0 || level >= (base?.level ?? 1);
+}
+
+/**
+ * Banner backgrounds live in one stylesheet (.bg-<id>) instead of inline styles, so pages
+ * listing a hundred calling cards don't re-parse megabytes of image data on every click.
+ */
+let bannerCss = false;
+export function ensureBannerStyles() {
+  if (bannerCss || typeof document === 'undefined') return;
+  bannerCss = true;
+  const el = document.createElement('style');
+  el.id = 'dp-banner-css';
+  el.textContent = BANNERS.map((b) => `.bg-${b.id}{background:${b.bg}}`).join('\n');
+  document.head.appendChild(el);
+}
 
 // ---------------------------------------------------------------- badges
 
@@ -109,10 +147,11 @@ export function playerCard(p: Profile, opts: { compact?: boolean } = {}) {
   const need = level >= MAX_LEVEL ? 1 : xpForLevel(level + 1) - base;
   const pct = level >= MAX_LEVEL ? 100 : Math.min(100, ((p.xp - base) / need) * 100);
   const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+  ensureBannerStyles();
   if (b.art) {
     // calling card: keep the artwork (and its title) clear, name strip underneath
     return `<div class="pcard art ${opts.compact ? 'compact' : ''}">
-      <div class="pc-art" style="background:${b.bg}"${b.sheet ? ' data-psheet' : ''}></div>
+      <div class="pc-art bg-${b.id}"${b.sheet ? ' data-psheet' : ''}></div>
       <div class="pc-strip"><div class="pc-badge">${badge(level, p.prestige, opts.compact ? 34 : 40)}</div>
         <div class="pc-text"><div class="pc-name">${esc(p.callsign)}</div>
         <div class="pc-rank">${p.prestige ? `PRESTIGE ${p.prestige} · ` : ''}LVL ${level} · ${rankInfo(level).name.toUpperCase()}</div></div></div>

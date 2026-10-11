@@ -1,10 +1,48 @@
-import { WEAPONS, type WeaponId } from './loadout';
+interface GunSfx {
+  crackF: number;
+  crackDur: number;
+  bodyF: number;
+  bodyDur: number;
+  boomF0: number;
+  boomF1: number;
+  boomDur: number;
+  boomAmp: number;
+  /** action noise: frequency and delay after the shot (0 = none, e.g. bolt guns and revolvers) */
+  mechF: number;
+  mechT: number;
+  /** reverb send */
+  send: number;
+  vol: number;
+}
+
+const gs = (crackF: number, crackDur: number, bodyF: number, bodyDur: number, boomF0: number, boomF1: number, boomDur: number, boomAmp: number, mechF: number, mechT: number, send: number, vol: number): GunSfx =>
+  ({ crackF, crackDur, bodyF, bodyDur, boomF0, boomF1, boomDur, boomAmp, mechF, mechT, send, vol });
+
+/** Per-gun shot recipes: SMGs snap, rifles bark, LMGs and snipers boom and roll. */
+const GUN_SFX: Record<string, GunSfx> = {
+  kr4: gs(2600, 0.035, 1100, 0.11, 140, 45, 0.14, 1.0, 3200, 0.045, 0.35, 0.9),
+  vk47: gs(2000, 0.045, 800, 0.15, 110, 38, 0.2, 1.2, 2400, 0.05, 0.45, 1),
+  vx9: gs(3200, 0.025, 1500, 0.07, 170, 60, 0.09, 0.7, 3800, 0.03, 0.25, 0.75),
+  sp45: gs(2400, 0.03, 900, 0.09, 130, 50, 0.12, 0.9, 2600, 0.035, 0.3, 0.85),
+  lm5: gs(2400, 0.04, 1000, 0.13, 120, 40, 0.17, 1.15, 2000, 0.05, 0.45, 1),
+  pk7: gs(1800, 0.05, 750, 0.17, 100, 34, 0.22, 1.3, 1800, 0.06, 0.5, 1.05),
+  kestrel: gs(1800, 0.06, 700, 0.22, 85, 30, 0.35, 1.5, 0, 0, 0.8, 1.15),
+  warden: gs(1500, 0.07, 600, 0.28, 75, 26, 0.45, 1.7, 0, 0, 0.95, 1.25),
+  talon: gs(1900, 0.055, 750, 0.2, 90, 32, 0.3, 1.4, 2200, 0.05, 0.75, 1.1),
+  vulture: gs(2000, 0.05, 780, 0.2, 95, 34, 0.28, 1.35, 2300, 0.05, 0.7, 1.1),
+  sk10: gs(2200, 0.045, 850, 0.16, 105, 36, 0.22, 1.2, 2500, 0.05, 0.55, 1),
+  mk20: gs(2000, 0.05, 800, 0.18, 100, 34, 0.24, 1.25, 2300, 0.05, 0.6, 1.05),
+  p9: gs(3000, 0.025, 1300, 0.07, 180, 70, 0.08, 0.7, 3500, 0.03, 0.25, 0.8),
+  r357: gs(1800, 0.05, 800, 0.16, 110, 40, 0.2, 1.3, 0, 0, 0.5, 1.05),
+};
+
 /** Fully synthesised SFX — no audio assets needed for the prototype. */
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
   /** effects go here; music has its own bus so it can be mixed separately */
   private sfxBus!: GainNode;
+  private verb!: GainNode;
   private musicBus!: GainNode;
   private noise!: AudioBuffer;
   volume = 0.7;
@@ -30,6 +68,25 @@ export class Sfx {
     this.musicBus = this.ctx.createGain();
     this.musicBus.gain.value = this.musicVolume * 0.5;
     this.musicBus.connect(this.master);
+    // outdoor reverb: generated impulse (early slap off walls, then a long decaying tail)
+    this.verb = this.ctx.createGain();
+    this.verb.gain.value = 0.55;
+    const conv = this.ctx.createConvolver();
+    const sr = this.ctx.sampleRate;
+    const ir = this.ctx.createBuffer(2, Math.floor(sr * 1.8), sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) {
+        const tt = i / sr;
+        const slap = tt > 0.045 && tt < 0.06 ? 0.6 : tt > 0.11 && tt < 0.125 ? 0.35 : 0;
+        d[i] = (Math.random() * 2 - 1) * (Math.exp(-tt * 3.2) * 0.5 + slap);
+      }
+    }
+    conv.buffer = ir;
+    const verbLp = this.ctx.createBiquadFilter();
+    verbLp.type = 'lowpass';
+    verbLp.frequency.value = 3200;
+    this.verb.connect(conv).connect(verbLp).connect(this.sfxBus);
     const len = this.ctx.sampleRate;
     this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noise.getChannelData(0);
@@ -329,35 +386,65 @@ export class Sfx {
   /** distance in metres (0 = player's own gun), pan -1..1 */
   gunshot(distance = 0, pan = 0, weapon: string = 'kr4', suppressed = false) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
     const near = distance < 1;
-    const ak = weapon === 'vk47' || weapon === 'r357';
-    const pistol = weapon === 'p9';
+    // sound travels: distant shots arrive late and lose their top end
+    const t = this.ctx.currentTime + (near ? 0 : Math.min(0.3, distance / 343));
+    const g = GUN_SFX[weapon] ?? GUN_SFX.kr4;
+    const vary = 0.96 + Math.random() * 0.08; // round-robin feel: no two shots identical
     if (suppressed) {
-      const out = this.out(near ? 0.45 : Math.min(0.3, 4 / (distance + 4)), pan);
-      this.burst(out, t, 0.06, 'bandpass', 900, 1.2, 1);
-      this.tone(out, t, 0.06, 220, 90, 'sine', 0.5);
-      if (near) this.tone(out, t + 0.02, 0.03, 3200, 2400, 'square', 0.05);
+      const out = this.send(near ? 0.55 : Math.min(0.35, 5 / (distance + 4)), pan, 0.12);
+      this.sweep(out, t, 0.09, 'bandpass', 1400 * vary, 500, 1.4, 1);
+      this.tone(out, t, 0.07, 240 * vary, 90, 'sine', 0.6);
+      if (near && g.mechF) this.sweep(out, t + g.mechT, 0.03, 'bandpass', g.mechF, g.mechF * 0.8, 6, 0.7);
       return;
     }
-    // per-class character: crack length, body pitch, tail length, loudness
-    const cls = WEAPONS[weapon as WeaponId]?.cls ?? 'ar';
-    const prof = {
-      ar: { crack: ak ? 0.12 : 0.09, lp: ak ? 6500 : 9000, body: ak ? 900 : 1400, tail: ak ? 0.6 : 0.45, thump: ak ? 110 : 140, len: ak ? 0.18 : 0.13, vol: 0.9 },
-      smg: { crack: 0.06, lp: 10000, body: 1700, tail: 0.32, thump: 160, len: 0.09, vol: 0.75 },
-      heavy: { crack: 0.13, lp: 6000, body: 800, tail: 0.7, thump: 95, len: 0.22, vol: 1 },
-      sniper: { crack: 0.18, lp: 5200, body: 600, tail: 1.6, thump: 70, len: 0.4, vol: 1.15 },
-      marksman: { crack: 0.13, lp: 6000, body: 850, tail: 0.8, thump: 100, len: 0.22, vol: 1 },
-      handgun: { crack: ak ? 0.12 : 0.06, lp: 900, body: ak ? 900 : 1400, tail: ak ? 0.6 : 0.45, thump: ak ? 110 : 140, len: ak ? 0.18 : 0.13, vol: 0.9 },
-    }[cls];
-    const att = near ? 1 : Math.min(1, (cls === 'sniper' ? 14 : 9) / (distance + 4));
-    const out = this.out(att * (near ? prof.vol : 0.85), pan);
-    const lp = near ? prof.lp : Math.max(900, 6000 - distance * 90);
-    this.burst(out, t, near ? prof.crack : 0.07, pistol ? 'highpass' : 'lowpass', pistol ? 900 : lp, 0.5, 1.2);
-    this.burst(out, t, prof.tail, 'bandpass', near ? prof.body : 700, 0.6, 0.25);
-    this.tone(out, t, prof.len, near ? prof.thump : 100, 38, 'sine', near ? 1.2 : 0.6);
-    if (near) this.tone(out, t + 0.03, 0.03, cls === 'smg' ? 3600 : ak ? 2400 : 3200, 1900, 'square', 0.04);
-    if (cls === 'sniper') this.burst(this.out(att * 0.35, pan), t + 0.08, 1.8, 'lowpass', 420, 0.4, 0.5); // rolling echo
+    const att = near ? 1 : Math.min(1, (g.send > 0.7 ? 16 : 10) / (distance + 4));
+    const wet = near ? g.send : Math.min(0.95, g.send + distance / 60);
+    const out = this.send(att * g.vol, pan, wet);
+    const far = near ? 1 : Math.max(0.15, 1 - distance / 70);
+    // 1. supersonic crack: very short, bright
+    this.sweep(out, t, g.crackDur, 'highpass', g.crackF * far, g.crackF * 0.6 * far, 0.7, 1.4 * (near ? 1 : far));
+    // 2. body: the mid-range bark of the cartridge
+    this.sweep(out, t, g.bodyDur, 'bandpass', g.bodyF * vary * (near ? 1 : 0.7), g.bodyF * 0.55, 1.1, 1.1);
+    // 3. boom: low-end punch with a fast pitch drop
+    this.tone(out, t, g.boomDur, g.boomF0 * vary, g.boomF1, 'sine', g.boomAmp * (near ? 1 : 0.7));
+    this.tone(out, t, g.boomDur * 0.6, g.boomF0 * 2 * vary, g.boomF1 * 2, 'triangle', g.boomAmp * 0.25 * far);
+    // 4. the action cycling, only audible up close
+    if (near && g.mechF) {
+      this.sweep(out, t + g.mechT, 0.025, 'bandpass', g.mechF, g.mechF * 0.85, 7, 0.35);
+      this.sweep(out, t + g.mechT + 0.035, 0.02, 'bandpass', g.mechF * 1.3, g.mechF * 1.1, 7, 0.22);
+    }
+  }
+
+  /** A gain stage panned into the dry bus with a share sent to the outdoor reverb. */
+  private send(gain: number, pan: number, wet: number) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    const p = ctx.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    g.connect(p).connect(this.sfxBus);
+    const w = ctx.createGain();
+    w.gain.value = wet;
+    g.connect(w).connect(this.verb);
+    return g;
+  }
+
+  /** Noise through a filter whose cutoff sweeps from f0 to f1, with an exponential decay. */
+  private sweep(dest: AudioNode, t: number, dur: number, type: BiquadFilterType, f0: number, f1: number, q: number, peak: number) {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.Q.value = q;
+    f.frequency.setValueAtTime(Math.max(20, f0), t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(peak, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t, Math.random() * 0.5, dur + 0.05);
   }
 
   explosion(distance: number, pan: number) {

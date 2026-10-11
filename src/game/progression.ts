@@ -16,15 +16,19 @@ export const XP = {
   grenade: 50,
 } as const;
 
-/** XP to go from `level` to `level + 1`. */
+/**
+ * XP to go from `level` to `level + 1`: 1,500 for level 2, growing quadratically so the
+ * late levels take a while (about 1.7M XP to reach 75, roughly 120 matches).
+ */
 export function xpToNext(level: number) {
-  return 800 + 140 * (level - 1);
+  const k = level - 1;
+  return 1500 + 250 * k + 7 * k * k;
 }
 
 /** Total XP (within the current prestige) required to reach `level`. */
 export function xpForLevel(level: number) {
-  const n = level - 1;
-  return 800 * n + (140 * n * (n - 1)) / 2;
+  const m = level - 1; // levels gained so far: sum of xpToNext(1..level-1)
+  return 1500 * m + (250 * m * (m - 1)) / 2 + (7 * (m - 1) * m * (2 * m - 1)) / 6;
 }
 
 export function levelForXp(xp: number) {
@@ -34,9 +38,12 @@ export function levelForXp(xp: number) {
 }
 
 export interface SoldierLook {
+  /** operator id (operators.ts): build, face and headgear */
+  operator: string;
   uniform: string;
   gear: string;
-  head: string;
+  /** legacy headgear choice, superseded by the operator */
+  head?: string;
 }
 
 export interface Profile {
@@ -66,7 +73,7 @@ const KEY = 'deadpixel.profile.v1';
 export function blankProfile(): Profile {
   return {
     xp: 0, prestige: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, weaponKills: {}, weaponHeads: {}, stats: {}, challenges: [], streaks: [...DEFAULT_STREAKS],
-    callsign: 'OPERATOR', banner: 'recruit', look: { uniform: 'desert', gear: 'coyote', head: 'nvg' },
+    callsign: 'OPERATOR', banner: 'recruit', look: { operator: 'ghost', uniform: 'desert', gear: 'coyote' },
   };
 }
 

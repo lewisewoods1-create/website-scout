@@ -174,7 +174,11 @@
       .picks .pick.empty { border-style: dashed; border-color: var(--line); background: none; }
       .streakgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
       .card.streakcard { position: relative; }
-      .go.small { font-size: 18px; padding: 6px 18px; margin-top: 4px; box-shadow: 3px 3px 0 var(--blood); align-self: flex-start; }
+.choices .card .fx { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+      .choices .card .fx em { font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: .5px; padding: 1px 5px; border: 1px solid currentColor; }
+      .choices .card .fx em.good { color: var(--ok); }
+      .choices .card .fx em.bad { color: var(--enemy); }
+            .go.small { font-size: 18px; padding: 6px 18px; margin-top: 4px; box-shadow: 3px 3px 0 var(--blood); align-self: flex-start; }
       .saved { font-family: var(--display); font-weight: 700; font-size: 14px; letter-spacing: 2px; color: var(--ok); animation: savedPulse 2.5s ease-out forwards; }
       @keyframes savedPulse { 0% { opacity: 0; transform: translateY(4px) } 10% { opacity: 1; transform: none } 75% { opacity: 1 } 100% { opacity: 0 } }
       .streakcard .sk-ic { color: var(--gold); margin-bottom: 4px; }
@@ -242,6 +246,18 @@
       /* soldier tab */
       .soldier-wrap { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 16px; align-items: start; margin-top: 10px; }
       .soldier-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+      .soldier-wrap .studio { position: relative; }
+      .op-tag { position: absolute; left: 12px; top: 10px; display: flex; flex-direction: column; border-left: 3px solid var(--acc); padding-left: 8px; pointer-events: none; }
+      .op-tag b { font-family: var(--display); font-size: 22px; letter-spacing: 2px; }
+      .op-tag span { font-size: 11px; letter-spacing: 2px; opacity: .7; }
+      .ops { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+      .card.op { border-left: 4px solid var(--acc); }
+      .card.op .role { color: var(--acc); font-weight: 700; letter-spacing: 2px; font-size: 11px; }
+      .card.op .kit { font-size: 10px; letter-spacing: 1px; opacity: .65; }
+      .ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+      .ugrid .card { padding-top: 0; overflow: hidden; }
+      .ugrid .usw { display: block; height: 46px; margin: 0 -12px 8px; border-bottom: 1px solid rgba(255,255,255,.15); }
+      .ugrid .card.locked .usw { filter: grayscale(.8) brightness(.5); }
       .studio.tall { margin: 0; }
       .studio .preview.tall { aspect-ratio: 3 / 4; }
       .banners { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }

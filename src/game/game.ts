@@ -19,7 +19,8 @@ import { canPrestige, enterPrestige, grantXp, loadProfile, saveProfile, levelFor
 import { nextUnlock, unlockTrack } from './unlocks';
 import { badgeImg, badgeThumb, rankInfo, thumbVersion } from './badges';
 import { playerCard } from './cosmetics';
-import { bump, bumpMax, checkChallenges } from './challenges';
+import { bump, bumpMax, challengeById, checkChallenges } from './challenges';
+import { OPERATORS } from './operators';
 import { STREAKS, StreakRuntime, streakIcon, type StreakId } from './killstreaks';
 import { clamp, damp, lerp } from './util';
 
@@ -122,7 +123,14 @@ export class Game {
   private templates: THREE.Group[] = [];
   private charLight = new THREE.DirectionalLight(0xdfe8ff, 1.3);
 
-  private profile: Profile = loadProfile();
+  private profile: Profile = Game.freshProfile();
+
+  /** Load the saved profile, dropping challenge ids from older builds' challenge lists. */
+  private static freshProfile() {
+    const p = loadProfile();
+    p.challenges = p.challenges.filter((id) => challengeById(id));
+    return p;
+  }
   phase: 'attract' | 'match' | 'ended' = 'attract';
   private cfg: MatchConfig = { mode: 'tdm', difficulty: 'regular', classIndex: 0, mapId: 'depot' };
   private classes: Loadout[] = loadClasses();
@@ -132,6 +140,11 @@ export class Game {
   private timeLeft = 0;
   private matchXp = 0;
   private streak = 0;
+  /** recoil bookkeeping: shots in the current burst, recoverable kick, camera shake */
+  private burst = 0;
+  private lastShotT = -99;
+  private recov = new THREE.Vector2();
+  private shake = 0;
   /** sniper hold-breath meter (1 = full) and sway clock */
   private breath = 1;
   private swayT = 0;
@@ -290,16 +303,18 @@ export class Game {
     const sm = soldierMaterials(mats);
     this.soldierMats = sm;
     const opt = ['iron', 'reflex', 'holo'] as const;
-    const looks: SoldierLook[] = [
-      { uniform: 'desert', gear: 'coyote', head: 'nvg' },
-      { uniform: 'woodland', gear: 'ranger', head: 'helmet' },
+    // each team keeps one uniform so sides read at a glance; operators vary faces and kit
+    const looks: Omit<SoldierLook, 'operator'>[] = [
+      { uniform: 'desert', gear: 'coyote' },
+      { uniform: 'woodland', gear: 'ranger' },
     ];
     // bots carry assault rifles mostly, plus SMGs, LMGs and marksman rifles for variety
     const botGuns: PrimaryId[] = ['kr4', 'vk47', 'vx9', 'lm5', 'sk10'];
     for (const variant of [0, 1] as const) {
       for (const weapon of botGuns) {
         const cfg: WeaponCfg = { weapon, optic: opt[(variant + botGuns.indexOf(weapon)) % 3], muzzle: 'none', under: weapon === 'kr4' ? 'grip' : 'none', mag: 'std', camo: 'none' };
-        const t = buildSoldier(sm, looks[variant], cfg);
+        const op = OPERATORS[(botGuns.indexOf(weapon) + variant * 2) % OPERATORS.length];
+        const t = buildSoldier(sm, { ...looks[variant], operator: op.id }, cfg);
         t.userData.weapon = weapon;
         t.userData.variant = variant;
         this.templates.push(t);
@@ -1061,12 +1076,24 @@ export class Game {
     if (shotKills >= 2) bump(this.profile, 'collaterals');
     if (!struck.length && wHit) this.effects.impact(wHit.point, wHit.normal, wHit.surface);
 
-    const adsK = lerp(1, 0.65, this.vm.ads) * st.recoil;
-    this.player.pitch += (0.006 + Math.random() * 0.003) * adsK;
-    this.player.yaw += (Math.random() - 0.45) * 0.005 * adsK;
-    this.punch += 0.01 * adsK;
+    // recoil: each gun climbs and drifts its own way; aiming and crouching steady it,
+    // heavies climb harder through a long burst, and part of the kick recovers when you stop
+    const pl = this.player;
+    this.burst = this.now - this.lastShotT < 0.3 ? this.burst + 1 : 0;
+    this.lastShotT = this.now;
+    const steady = lerp(1, 0.68, this.vm.ads) * (pl.crouchT > 0.5 ? 0.85 : 1);
+    const esc = st.escalate ? 1 + Math.min(this.burst / 14, 1) * 0.8 : 1;
+    const first = this.burst === 0 ? 1.2 : 1;
+    const v = st.kickV * steady * esc * first * (0.85 + Math.random() * 0.3);
+    const hz = st.kickH * steady * (st.drift * 0.7 + (Math.random() * 2 - 1));
+    pl.pitch += v;
+    pl.yaw -= hz;
+    this.recov.x += v * 0.65;
+    this.recov.y -= hz * 0.5;
+    this.punch += v * 0.5;
+    this.shake = Math.min(0.03, this.shake + (st.cls === 'sniper' ? 0.02 : st.cls === 'heavy' ? 0.004 : st.cls === 'marksman' ? 0.006 : 0.0015));
     this.bloom = Math.min(this.bloom + 0.007 * st.recoil, 0.06);
-    this.vm.fire();
+    this.vm.fire(clamp(st.kickV / (0.011 * st.recoil), 0.6, 1.6));
     if (st.bolt) {
       const secs = (60 / st.rpm) * 0.85;
       this.vm.cycleBolt(secs);
@@ -1847,8 +1874,20 @@ export class Game {
       cam.position.y = lerp(cam.position.y, p.pos.y + 0.35, this.deathCam);
       cam.rotation.set(p.pitch * (1 - this.deathCam) - 0.2 * this.deathCam, p.yaw, 0.6 * this.deathCam);
     } else {
-      cam.rotation.set(p.pitch + this.punch, p.yaw, 0);
+      // recover part of the recoil once the trigger is released
+      if (this.now - this.lastShotT > 0.12 && (this.recov.x !== 0 || this.recov.y !== 0)) {
+        const k = 1 - Math.exp(-dt * 9);
+        p.pitch -= this.recov.x * k;
+        p.yaw -= this.recov.y * k;
+        this.recov.multiplyScalar(1 - k);
+        if (Math.abs(this.recov.x) < 1e-5) this.recov.set(0, 0);
+      }
+      this.shake = damp(this.shake, 0, 10, dt);
+      const sx = (Math.random() - 0.5) * this.shake;
+      const sy = (Math.random() - 0.5) * this.shake;
+      cam.rotation.set(p.pitch + this.punch + sx, p.yaw + sy, sy * 0.5);
     }
+    this.vm.adsTime = this.gun.stats.adsTime;
     // sniper scope: full-screen sight picture, breathing sway, SHIFT to hold breath
     const scoped = p.alive && this.gun.stats.scoped && this.vm.ads > 0.82;
     if (scoped) {

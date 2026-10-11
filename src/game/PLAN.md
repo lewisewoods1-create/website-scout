@@ -148,7 +148,7 @@ A small companion that **floats just under the gun** in first person and reacts 
 ## 5. Ranks, emblems and banners
 
 - Levels 1–75, then Prestige 1–10 (manual, from Barracks; resets to level 1, keeps stats and weapon kills).
-- XP per level grows linearly: 800 XP for level 2, +140 per level after (about 437k XP to reach 75).
+- XP per level grows quadratically: 1,500 XP for level 2, about 1.7M XP to reach 75.
 - Badges come from the Dead Pixels badge pack. Its generator (`vendor/badges.js`) renders every badge as
   vector SVG at runtime (output is byte-identical to the pack's SVG files), and animates prestige 4-10 live.
   The pack defines 75 levels (25 ranks x 3 tiers), one badge per level.

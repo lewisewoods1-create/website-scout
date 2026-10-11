@@ -129,6 +129,8 @@ export class Viewmodel {
   private land = 0;
   /** -1 when idle, else 0..1 reload progress */
   reload = -1;
+  /** seconds to aim down sights for the held gun */
+  adsTime = 0.25;
   /** hide the gun (full-screen sniper scope) */
   hidden = false;
   /** bolt cycle progress after a shot, -1 when closed */
@@ -363,8 +365,9 @@ export class Viewmodel {
     this.boltDur = secs;
   }
 
-  fire() {
-    const adsK = lerp(1, 0.35, this.ads) * this.recoilMul;
+  /** `power` scales the visual kick to the gun (SMG ~0.7, rifle 1, sniper ~3). */
+  fire(power = 1) {
+    const adsK = lerp(1, 0.35, this.ads) * this.recoilMul * power;
     this.kick += 0.028 * adsK;
     this.kickPitch += (0.045 + Math.random() * 0.02) * adsK;
     this.kickYaw += (Math.random() - 0.5) * 0.03 * adsK;
@@ -395,7 +398,8 @@ export class Viewmodel {
   }
 
   update(dt: number, inp: ViewmodelInput) {
-    this.ads = damp(this.ads, inp.ads && this.reload < 0 && !inp.sprinting && !this.busy ? 1 : 0, 14, dt);
+    // aim speed comes from the gun and its attachments (seconds to full ADS)
+    this.ads = damp(this.ads, inp.ads && this.reload < 0 && !inp.sprinting && !this.busy ? 1 : 0, 3.2 / this.adsTime, dt);
     this.sprint = damp(this.sprint, inp.sprinting && this.reload < 0 ? 1 : 0, 9, dt);
     const moveK = clamp(inp.speed / 5, 0, 1.5) * (inp.grounded ? 1 : 0.2);
     this.bobAmt = damp(this.bobAmt, moveK, 8, dt);

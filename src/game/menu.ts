@@ -11,11 +11,13 @@ import { buildSoldier } from './soldier';
 import { MAX_LEVEL, MAX_PRESTIGE, xpForLevel } from './progression';
 import { ART_MAX_LEVEL, badgeImg, prestigeName, rankInfo } from './badges';
 import { nextUnlock, unlockTrack } from './unlocks';
-import { BANNERS, GEAR, HEADGEAR, UNIFORMS, bannerUnlocked, playerCard, type Banner } from './cosmetics';
-import { CHALLENGES, THEMES, TIER_NAMES, cardArt, isDone, statValue } from './challenges';
+import { BANNERS, GEAR, UNIFORMS, UNIFORM_CAMOS, bannerUnlocked, ensureBannerStyles, playerCard, uniformProgress, uniformUnlocked, type Banner } from './cosmetics';
+import { OPERATORS, operatorById, type Operator } from './operators';
+import { CHALLENGES, THEMES, TIER_NAMES, isDone, statValue } from './challenges';
 import { MAPS } from './maps';
 import { STREAKS, STREAK_ORDER, streakIcon, type StreakId } from './killstreaks';
 
+const SECONDARY_SLOTS = ['secondary', 'secAttach', 'secCamo'];
 const CLASS_ORDER: WeaponClassId[] = ['ar', 'smg', 'heavy', 'marksman', 'sniper', 'handgun'];
 
 type Page = 'mp' | 'bots' | 'cac' | 'soldier' | 'challenges' | 'barracks' | 'settings';
@@ -59,6 +61,11 @@ export class Menu {
   private prestigeArmed = false;
   private chFilter: 'all' | 'open' | 'done' = 'all';
   private cacTab: 'classes' | 'streaks' = 'classes';
+  /** which weapon the Create a Class preview shows */
+  private previewSide: 'primary' | 'secondary' = 'primary';
+  private soldierTab: 'operator' | 'uniform' | 'cards' = 'operator';
+  private cardGroup = 'rank';
+  private cardsOwned = false;
   /** when the edited class was last saved (for the confirmation pill) */
   private savedAt = 0;
   /** killstreak picks while fewer than three are chosen */
@@ -304,6 +311,31 @@ export class Menu {
     return cards.join('');
   }
 
+  /** Green/red tags for what an attachment changes, measured against the factory part. */
+  private attachTags(key: string, val: string) {
+    if (!['optic', 'muzzle', 'under', 'mag'].includes(key)) return '';
+    const c = this.ctx.classes[this.editIndex];
+    const factory = { optic: fitsWeapon(OPTICS, c.weapon)[0].id, muzzle: 'none', under: 'none', mag: 'std' }[key as 'optic'];
+    if (val === factory) return '';
+    const a = computeStats({ ...c, [key]: factory } as Loadout);
+    const b = computeStats({ ...c, [key]: val } as Loadout);
+    const tags: [string, number, boolean][] = [
+      ['VERT RECOIL', b.kickV / a.kickV - 1, false],
+      ['SIDE RECOIL', b.kickH / a.kickH - 1, false],
+      ['HIP SPREAD', b.hipSpread / a.hipSpread - 1, false],
+      ['ADS', b.adsTime / a.adsTime - 1, false],
+      ['RELOAD', b.reload / a.reload - 1, false],
+      ['MOVE', b.move / a.move - 1, true],
+      ['AMMO', b.mag / a.mag - 1, true],
+      ['ZOOM', a.adsFov / b.adsFov - 1, true],
+      ['RANGE DMG', b.damageAt(80) / a.damageAt(80) - 1, true],
+    ];
+    return `<span class="fx">${tags
+      .filter(([, d]) => Math.abs(d) >= 0.01)
+      .map(([n, d, up]) => `<em class="${d > 0 === up ? 'good' : 'bad'}">${n} ${d > 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)}%</em>`)
+      .join('')}</span>`;
+  }
+
   private slotRow(key: string, label: string, opts: Choice[], current: string, u: Partial<UnlockCtx>, weaponName: string, attr = 'set', note = '') {
     const cur = opts.find((o) => o.id === current) ?? opts[0];
     const open = this.openSlot === key;
@@ -317,7 +349,7 @@ export class Menu {
             const locked = !isUnlocked(o, this.ctxFor(u));
             const prog = locked && o.heads ? `<span class="prog">${Math.min(u.heads ?? 0, o.heads)} / ${o.heads}</span>${bar(((u.heads ?? 0) / o.heads) * 100)}` : '';
             return `${head}<button type="button" class="card ${current === o.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-${attr}="${key}" data-val="${o.id}">
-              <b>${o.swatch ? `<i class="sw" style="background:${o.swatch}"></i>` : ''}${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${locked ? `<span class="lock">UNLOCKS · ${lockText(o, weaponName)}</span>${prog}` : ''}</button>`;
+              <b>${o.swatch ? `<i class="sw" style="background:${o.swatch}"></i>` : ''}${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${attr === 'set' ? this.attachTags(key, o.id) : ''}${locked ? `<span class="lock">UNLOCKS · ${lockText(o, weaponName)}</span>${prog}` : ''}</button>`;
           })
           .join('')}</div>`
       : '';
@@ -338,6 +370,8 @@ export class Menu {
       ['HEADSHOT', st.cls === 'sniper' ? 'KILL' : `${Math.round(st.zoneDamage('head', 0))} (×${WEAPONS[w].headMult})`],
       ['CLASS', `${WEAPON_CLASSES[st.cls].name} · ${st.move >= 1 ? 'FAST' : st.move >= 0.95 ? 'STEADY' : 'HEAVY'} MOVEMENT${st.bolt ? ' · BOLT ACTION' : ''}`],
       ['FIRE RATE', `${st.rpm} RPM${st.auto ? '' : ' · SEMI'}`],
+      ['ADS TIME', `${Math.round(st.adsTime * 1000)} ms`],
+      ['RECOIL', `${Math.round(st.kickV * 1000)} up · ${Math.round(st.kickH * 1000)} side${st.escalate ? ' · CLIMBS IN BURSTS' : ''}`],
       ['MAGAZINE', `${st.mag} + ${st.reserve}`],
       ['RELOAD', `${st.reload.toFixed(1)}s / ${st.reloadEmpty.toFixed(1)}s empty`],
       ['KILLS', `${p.weaponKills[w] ?? 0}`],
@@ -402,7 +436,9 @@ export class Menu {
     const sec = WEAPONS[c.secondary];
     const primKills = pk[c.weapon] ?? 0;
     const secKills = pk[c.secondary] ?? 0;
-    const showSecondary = ['secondary', 'secAttach', 'secCamo'].includes(this.openSlot ?? '');
+    // the preview follows the weapon you're editing and stays on it after a pick closes the slot
+    if (this.openSlot) this.previewSide = SECONDARY_SLOTS.includes(this.openSlot) ? 'secondary' : 'primary';
+    const showSecondary = this.previewSide === 'secondary';
     const w = showSecondary ? sec : prim;
     const bars = Object.entries(w.bars)
       .map(([k, v]) => `<div class="stat"><span>${k.toUpperCase()}</span><div class="b"><i style="width:${v * 10}%"></i></div></div>`)
@@ -455,34 +491,79 @@ export class Menu {
   }
 
   private bannerCard(b: Banner, locked: boolean, on: boolean, lockLabel: string) {
-    return `<button type="button" class="bcard ${b.art ? 'art' : ''} ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" style="background:${b.bg}" title="${b.name}"${b.sheet ? ' data-psheet' : ''}>
+    return `<button type="button" class="bcard bg-${b.id} ${b.art ? 'art' : ''} ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-banner="${b.id}" title="${b.name}"${b.sheet ? ' data-psheet' : ''}>
       ${b.motif ? `<span class="pc-motif">${b.motif}</span>` : ''}${b.art ? '' : `<span class="bname">${b.name}</span>`}${locked ? `<span class="block">${lockLabel}</span>` : ''}</button>`;
   }
 
   private soldierHtml() {
+    ensureBannerStyles();
+    const p = this.ctx.game.profileData;
+    const tabs = (['operator', 'uniform', 'cards'] as const)
+      .map((t) => `<button type="button" class="fchip ${this.soldierTab === t ? 'on' : ''}" data-stab="${t}">${{ operator: 'OPERATOR', uniform: 'UNIFORM & GEAR', cards: 'CALLING CARDS' }[t]}</button>`)
+      .join('');
+    const body = this.soldierTab === 'operator' ? this.operatorTab() : this.soldierTab === 'uniform' ? this.uniformTab() : this.cardsTab();
+    const op = operatorById(p.look.operator);
+    return `<h2>SOLDIER</h2><div class="sub">Pick your operator, dress them in earned camos and choose a calling card.</div>
+      <div class="soldier-wrap"><div class="studio tall"><div id="preview-slot" data-kind="soldier"></div>
+          <div class="op-tag" style="--acc:${op.accent}"><b>${op.name}</b><span>${op.role}</span></div></div>
+        <div class="soldier-side">${playerCard(p)}
+          <div class="label">CALLSIGN</div><input class="name" id="callsign" maxlength="16" aria-label="Callsign" value="${esc(p.callsign)}">
+          <div class="fchips">${tabs}</div>
+          ${body}
+        </div></div>`;
+  }
+
+  private operatorTab() {
+    const cur = this.ctx.game.profileData.look.operator;
+    const kit = (o: Operator) => [o.face === 'bare' ? 'NO MASK' : o.face.toUpperCase(), o.eyes === 'none' ? '' : o.eyes.toUpperCase(), o.head === 'nvg' ? 'HELMET + NVG' : o.head.toUpperCase(), o.heavy ? 'HEAVY ARMOUR' : '']
+      .filter(Boolean)
+      .join(' · ');
+    return `<div class="ops">${OPERATORS.map(
+      (o) => `<button type="button" class="card op ${cur === o.id ? 'on' : ''}" data-op="${o.id}" style="--acc:${o.accent}">
+        <b>${o.name}</b><span class="role">${o.role}</span><span>${o.bio}</span><span class="kit">${kit(o)}</span></button>`,
+    ).join('')}</div>`;
+  }
+
+  private uniformTab() {
     const p = this.ctx.game.profileData;
     const lvl = this.level();
     const all = this.ctx.settings.unlockAll;
-    const opt = (key: 'uniform' | 'gear' | 'head', label: string, list: Choice[]) => this.slotRow(key, label, list, p.look[key], {}, '', 'look');
-    const group = (list: Banner[], lockLabel: (b: Banner) => string) =>
-      list.map((b) => this.bannerCard(b, !bannerUnlocked(b, lvl, p.prestige, all, p.challenges), p.banner === b.id, lockLabel(b))).join('');
-    const rankB = BANNERS.filter((b) => !b.prestige && !b.challenge);
-    const presB = BANNERS.filter((b) => b.prestige);
-    const chB = BANNERS.filter((b) => b.challenge);
-    const chGot = chB.filter((b) => bannerUnlocked(b, lvl, p.prestige, all, p.challenges)).length;
-    return `<h2>SOLDIER</h2><div class="sub">Your operator and calling card. Faces and gear sets are still to come.</div>
-      <div class="soldier-wrap"><div class="studio tall"><div id="preview-slot" data-kind="soldier"></div></div>
-        <div class="soldier-side">${playerCard(p)}
-          <div class="label">CALLSIGN</div><input class="name" id="callsign" maxlength="16" aria-label="Callsign" value="${esc(p.callsign)}">
-          <div class="label">LOOK</div>
-          <div class="slots">${opt('uniform', 'UNIFORM', UNIFORMS)}${opt('gear', 'GEAR', GEAR)}${opt('head', 'HEADGEAR', HEADGEAR)}</div>
-        </div></div>
-      <div class="label">RANK BANNERS</div><div class="banners">${group(rankB, (b) => `LVL ${b.level ?? 1}`)}</div>
-      <div class="label">PRESTIGE BANNERS</div><div class="banners">${group(presB, (b) => `PRESTIGE ${b.prestige}`)}</div>
-      <div class="label">CALLING CARDS · ${chGot} / ${chB.length} · EARNED FROM CHALLENGES</div><div class="banners cards">${group(chB, () => 'LOCKED')}</div>`;
+    const card = (key: 'uniform' | 'gear', o: Choice, locked: boolean, lock: string, prog = '') =>
+      `<button type="button" class="card ${p.look[key] === o.id ? 'on' : ''} ${locked ? 'locked' : ''}" data-look="${key}" data-val="${o.id}">
+        <i class="usw" style="background:${o.swatch}"></i><b>${o.name}</b>${o.desc ? `<span>${o.desc}</span>` : ''}${locked ? `<span class="lock">${lock}</span>${prog}` : ''}</button>`;
+    const base = UNIFORMS.map((u) => card('uniform', u, !uniformUnlocked(u.id, p, lvl, all), `UNLOCKS · LVL ${u.level ?? 1}`)).join('');
+    const camos = UNIFORM_CAMOS.map((u) => {
+      const v = uniformProgress(u, p, lvl);
+      return card('uniform', u, !uniformUnlocked(u.id, p, lvl, all), 'CHALLENGE', `<span class="prog">${v.toLocaleString()} / ${u.target.toLocaleString()}</span>${bar((v / u.target) * 100)}`);
+    }).join('');
+    const gear = GEAR.map((g) => card('gear', g, !all && p.prestige === 0 && lvl < (g.level ?? 1), `UNLOCKS · LVL ${g.level ?? 1}`)).join('');
+    const got = UNIFORM_CAMOS.filter((u) => uniformUnlocked(u.id, p, lvl, all)).length;
+    return `<div class="label">UNIFORM</div><div class="ugrid">${base}</div>
+      <div class="label">OPERATOR CAMOS · ${got} / ${UNIFORM_CAMOS.length} · EARNED FROM CHALLENGES</div><div class="ugrid">${camos}</div>
+      <div class="label">GEAR</div><div class="ugrid">${gear}</div>`;
+  }
+
+  private cardsTab() {
+    const p = this.ctx.game.profileData;
+    const lvl = this.level();
+    const all = this.ctx.settings.unlockAll;
+    const open = (b: Banner) => bannerUnlocked(b, lvl, p.prestige, all, p.challenges);
+    const groups: [string, string, Banner[], (b: Banner) => string][] = [
+      ['rank', 'RANK', BANNERS.filter((b) => !b.prestige && !b.challenge), (b) => `LVL ${b.level ?? 1}`],
+      ['prestige', 'PRESTIGE', BANNERS.filter((b) => b.prestige), (b) => `PRESTIGE ${b.prestige}`],
+      ['challenge', 'CHALLENGE', BANNERS.filter((b) => b.challenge), () => 'LOCKED'],
+    ];
+    const chips = groups
+      .map(([id, name, list]) => `<button type="button" class="fchip ${this.cardGroup === id ? 'on' : ''}" data-cgrp="${id}">${name} · ${list.filter(open).length}/${list.length}</button>`)
+      .join('');
+    const [, , list, lockLabel] = groups.find(([id]) => id === this.cardGroup) ?? groups[0];
+    const shown = this.cardsOwned ? list.filter(open) : list;
+    return `<div class="fchips">${chips}<button type="button" class="fchip ${this.cardsOwned ? 'on' : ''}" data-cown="1">UNLOCKED ONLY</button></div>
+      <div class="banners ${this.cardGroup === 'challenge' ? 'cards' : ''}">${shown.map((b) => this.bannerCard(b, !open(b), p.banner === b.id, lockLabel(b))).join('') || '<div class="sub">Nothing unlocked here yet.</div>'}</div>`;
   }
 
   private challengesHtml() {
+    ensureBannerStyles();
     const p = this.ctx.game.profileData;
     const lvl = this.level();
     const doneN = p.challenges.length;
@@ -499,17 +580,30 @@ export class Menu {
           const done = isDone(p, c);
           const v = Math.min(c.target, statValue(p, c.stat, lvl));
           return `<div class="chcard ${done ? 'done' : ''}">
-            <div class="chban" style="background:url(${cardArt(c.id)}) center / 100% 100% no-repeat, #111">${done ? '<span class="chk">✓</span>' : ''}</div>
+            <div class="chban bg-${c.id}">${done ? '<span class="chk">✓</span>' : ''}</div>
             <div class="chtxt"><span class="tier t${c.tier}">${TIER_NAMES[c.tier - 1]}</span><span>${c.desc}</span>${bar((v / c.target) * 100)}
               <div class="chfoot"><em>${done ? 'COMPLETE' : `${v.toLocaleString()} / ${c.target.toLocaleString()}`}</em><em>+${c.xp.toLocaleString()} XP · CARD</em></div></div></div>`;
         })
         .join('');
       return `<section class="chtheme"><div class="label">${t.name} · ${got}/5</div><div class="chgrid">${cards}</div></section>`;
     }).join('');
+    const camoCards = UNIFORM_CAMOS.filter((u) => keep(uniformProgress(u, p, lvl) >= u.target))
+      .map((u) => {
+        const v = uniformProgress(u, p, lvl);
+        const done = v >= u.target;
+        return `<div class="chcard ${done ? 'done' : ''}">
+          <div class="chban" style="background:${u.swatch}">${done ? '<span class="chk">✓</span>' : ''}</div>
+          <div class="chtxt"><span class="tier">${u.name}</span><span>${u.desc}</span>${bar((v / u.target) * 100)}
+            <div class="chfoot"><em>${done ? 'COMPLETE' : `${v.toLocaleString()} / ${u.target.toLocaleString()}`}</em><em>OPERATOR CAMO</em></div></div></div>`;
+      })
+      .join('');
+    const camoSec = camoCards
+      ? `<section class="chtheme"><div class="label">OPERATOR CAMOS · ${UNIFORM_CAMOS.filter((u) => uniformProgress(u, p, lvl) >= u.target).length}/${UNIFORM_CAMOS.length} · WORN ON THE SOLDIER PAGE</div><div class="chgrid">${camoCards}</div></section>`
+      : '';
     return `<h2>CHALLENGES</h2><div class="sub">${doneN} of ${CHALLENGES.length} complete. Each challenge unlocks its calling card: 20 sets of 5, from a gunmetal frame up to gold mastery.</div>
       ${bar(doneN)}
       <div class="fchips">${chips}</div>
-      ${sections || '<div class="sub">Nothing here yet.</div>'}`;
+      ${camoSec}${sections || (camoSec ? '' : '<div class="sub">Nothing here yet.</div>')}`;
   }
 
   private camoTrack() {
@@ -657,11 +751,30 @@ export class Menu {
     pick('edit', (v) => {
       this.editIndex = Number(v);
       this.openSlot = null;
+      this.previewSide = 'primary';
     });
-    pick('banner', (v) => {
-      g.profileData.banner = v;
+    pick('stab', (v) => (this.soldierTab = v as typeof this.soldierTab));
+    pick('cgrp', (v) => (this.cardGroup = v));
+    pick('cown', () => (this.cardsOwned = !this.cardsOwned));
+    pick('op', (v) => {
+      g.profileData.look.operator = v;
       g.saveProfileNow();
     });
+    // banner picks update in place: no full page rebuild for a highlight and two player cards
+    panel.querySelectorAll<HTMLElement>('[data-banner]').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (b.classList.contains('locked')) return;
+        g.sfx.uiMove();
+        g.profileData.banner = b.dataset.banner!;
+        g.saveProfileNow();
+        panel.querySelectorAll('.bcard.on').forEach((el) => el.classList.remove('on'));
+        b.classList.add('on');
+        this.root.querySelectorAll('.pcard').forEach((el) => {
+          const compact = el.classList.contains('compact');
+          el.outerHTML = playerCard(g.profileData, { compact });
+        });
+      }),
+    );
     panel.querySelectorAll<HTMLElement>('[data-set][data-val]').forEach((b) =>
       b.addEventListener('click', () => {
         if (b.classList.contains('locked')) return;
