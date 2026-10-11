@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ps1ify, LAYER_WORLD } from './renderer';
+import { fireFx } from './mapfx';
 
 export type Surface = 'concrete' | 'metal' | 'wood' | 'dirt';
 
@@ -46,6 +47,8 @@ export interface GameMap {
   root: THREE.Group;
   nav: NavGrid;
   sky: THREE.Texture;
+  /** per-frame map effects (fires, smoke) */
+  tick(dt: number, t: number): void;
   dispose(): void;
 }
 
@@ -75,6 +78,8 @@ function worldBox(cx: number, cy: number, cz: number, w: number, h: number, d: n
 
 export class MapBuilder {
   boxes: Box[] = [];
+  /** burning spots: x, y, z, size */
+  fires: THREE.Vector4[] = [];
   readonly root = new THREE.Group();
   private geos = new Map<string, THREE.BufferGeometry[]>();
   private defs: Record<string, MatDef>;
@@ -115,6 +120,10 @@ export class MapBuilder {
     const list = this.geos.get(mat) ?? [];
     list.push(g.index ? g.toNonIndexed() : g);
     this.geos.set(mat, list);
+  }
+
+  fire(x: number, y: number, z: number, size = 1) {
+    this.fires.push(new THREE.Vector4(x, y, z, size));
   }
 
   light(l: THREE.Light) {
@@ -207,6 +216,7 @@ export function buildMap(scene: THREE.Scene, def: MapDef): GameMap {
     }
   }
   const sky = def.theme.sky();
+  const fx = b.fires.length ? fireFx(b.root, b.fires) : null;
   return {
     id: def.id,
     boxes: b.boxes,
@@ -215,6 +225,9 @@ export function buildMap(scene: THREE.Scene, def: MapDef): GameMap {
     root: b.root,
     nav,
     sky,
+    tick(dt, t) {
+      fx?.(dt, t);
+    },
     dispose() {
       scene.remove(b.root);
       b.root.traverse((o) => {
@@ -224,6 +237,8 @@ export function buildMap(scene: THREE.Scene, def: MapDef): GameMap {
           (m.material as THREE.MeshLambertMaterial).map?.dispose();
           (m.material as THREE.Material).dispose();
         }
+        const sp = o as THREE.Sprite;
+        if (sp.isSprite) (sp.material as THREE.SpriteMaterial).dispose();
       });
       sky.dispose();
     },

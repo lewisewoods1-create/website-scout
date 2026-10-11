@@ -195,47 +195,6 @@ export function hazardTex() {
   return retro(c);
 }
 
-export function skyTex() {
-  const rnd = mulberry32(99);
-  const [c, ctx] = canvas(256, 128);
-  const g = ctx.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, '#120d24');
-  g.addColorStop(0.35, '#3a2147');
-  g.addColorStop(0.47, '#a2483a');
-  g.addColorStop(0.5, '#e08a3c');
-  g.addColorStop(0.53, '#3b2d2a');
-  g.addColorStop(1, '#16110f');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 128);
-  // sun
-  ctx.fillStyle = '#ffd38a';
-  ctx.beginPath();
-  ctx.arc(64, 60, 5, 0, Math.PI * 2);
-  ctx.fill();
-  // streaky clouds
-  for (let i = 0; i < 40; i++) {
-    const y = 30 + rnd() * 30;
-    ctx.fillStyle = `rgba(${200 + rnd() * 55},${90 + rnd() * 60},${70 + rnd() * 40},${0.08 + rnd() * 0.18})`;
-    ctx.fillRect(rnd() * 256, y, 20 + rnd() * 60, 1 + rnd() * 2);
-  }
-  // distant skyline silhouette
-  ctx.fillStyle = '#0d0a0c';
-  let x = 0;
-  while (x < 256) {
-    const w = 4 + rnd() * 10;
-    const h = 2 + rnd() * 9;
-    ctx.fillRect(x, 64 - h, w, h + 2);
-    x += w;
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  t.mapping = THREE.EquirectangularReflectionMapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 export function blobShadowTex() {
   const [c, ctx] = canvas(32, 32);
   const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
@@ -529,55 +488,6 @@ export function dotReticleTex() {
 
 // ---------------------------------------------------------------- map pool
 
-export interface SkyStyle {
-  stops: [number, string][];
-  sun: { u: number; v: number; r: number; color: string } | null;
-  clouds: { color: string; count: number; v0: number; v1: number };
-  skyline: string | null;
-}
-
-/** Parameterised low-res equirect sky. Horizon sits at v = 0.5. */
-export function skyThemed(style: SkyStyle, seed = 99) {
-  const rnd = mulberry32(seed);
-  const [c, ctx] = canvas(256, 128);
-  const g = ctx.createLinearGradient(0, 0, 0, 128);
-  for (const [o, col] of style.stops) g.addColorStop(o, col);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 128);
-  if (style.sun) {
-    const s = style.sun;
-    const rg = ctx.createRadialGradient(s.u * 256, s.v * 128, 0, s.u * 256, s.v * 128, s.r * 4);
-    rg.addColorStop(0, s.color);
-    rg.addColorStop(0.25, s.color);
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = rg;
-    ctx.fillRect(0, 0, 256, 128);
-  }
-  for (let i = 0; i < style.clouds.count; i++) {
-    ctx.globalAlpha = 0.06 + rnd() * 0.18;
-    ctx.fillStyle = style.clouds.color;
-    ctx.fillRect(rnd() * 256, (style.clouds.v0 + rnd() * (style.clouds.v1 - style.clouds.v0)) * 128, 20 + rnd() * 60, 1 + rnd() * 3);
-  }
-  ctx.globalAlpha = 1;
-  if (style.skyline) {
-    ctx.fillStyle = style.skyline;
-    let x = 0;
-    while (x < 256) {
-      const w = 4 + rnd() * 12;
-      const h = 1 + rnd() * 7;
-      ctx.fillRect(x, 64 - h, w, h + 2);
-      x += w;
-    }
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  t.mapping = THREE.EquirectangularReflectionMapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 export function sandTex(seed = 81) {
   const rnd = mulberry32(seed);
   const [c, ctx] = canvas(64, 64);
@@ -753,6 +663,158 @@ export function smokeTex() {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 64, 64);
   }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ---------------------------------------------------------------- large maps
+
+export function asphaltTex(seed = 91, line: string | null = null) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#3a3a3c';
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, 0.25, 1);
+  noise(ctx, 64, 64, rnd, 0.12, 4);
+  // cracks and tar seams
+  ctx.strokeStyle = 'rgba(15,15,16,0.55)';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    let x = rnd() * 64;
+    let y = rnd() * 64;
+    ctx.moveTo(x, y);
+    for (let k = 0; k < 5; k++) ctx.lineTo((x += (rnd() - 0.5) * 18), (y += (rnd() - 0.5) * 18));
+    ctx.stroke();
+  }
+  if (line) {
+    // dashed lane line down the middle of the tile
+    ctx.fillStyle = line;
+    ctx.fillRect(31, 0, 2, 40);
+  }
+  return retro(c);
+}
+
+export function brickTex(seed = 92, base = '#7a3e2c') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = '#4a4440';
+  ctx.fillRect(0, 0, 64, 64);
+  for (let y = 0; y < 64; y += 6) {
+    const off = (y / 6) % 2 ? 6 : 0;
+    for (let x = -off; x < 64; x += 12) {
+      const v = (rnd() - 0.5) * 30;
+      ctx.fillStyle = base;
+      ctx.globalAlpha = 1;
+      ctx.fillRect(x + 1, y + 1, 10, 4);
+      ctx.fillStyle = v > 0 ? `rgba(255,220,200,${v / 120})` : `rgba(0,0,0,${-v / 80})`;
+      ctx.fillRect(x + 1, y + 1, 10, 4);
+    }
+  }
+  noise(ctx, 64, 64, rnd, 0.14, 1);
+  return retro(c);
+}
+
+export function foliageTex(seed = 93, base = '#2f4a26') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = rnd() > 0.5 ? 'rgba(120,160,70,0.35)' : 'rgba(10,25,8,0.4)';
+    ctx.fillRect(rnd() * 64, rnd() * 64, 2 + rnd() * 3, 2 + rnd() * 2);
+  }
+  noise(ctx, 64, 64, rnd, 0.15, 2);
+  return retro(c);
+}
+
+export function glassTex(seed = 94, tint = '#28404c') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = tint;
+  ctx.fillRect(0, 0, 64, 64);
+  // window grid with frames and the odd lit or broken pane
+  for (let y = 0; y < 64; y += 16) {
+    for (let x = 0; x < 64; x += 16) {
+      const r = rnd();
+      ctx.fillStyle = r < 0.15 ? 'rgba(255,200,120,0.55)' : r < 0.3 ? 'rgba(0,0,0,0.6)' : `rgba(160,200,220,${0.08 + rnd() * 0.15})`;
+      ctx.fillRect(x + 2, y + 2, 12, 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(x + 3, y + 3, 4, 1);
+    }
+  }
+  ctx.fillStyle = '#2a2a2a';
+  for (let i = 0; i < 64; i += 16) {
+    ctx.fillRect(i, 0, 2, 64);
+    ctx.fillRect(0, i, 64, 2);
+  }
+  return retro(c);
+}
+
+export function gravelTex(seed = 95, base = '#5a5248') {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 400; i++) {
+    const v = 60 + rnd() * 90;
+    ctx.fillStyle = `rgb(${v},${v * 0.95},${v * 0.88})`;
+    ctx.fillRect(rnd() * 64, rnd() * 64, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+  noise(ctx, 64, 64, rnd, 0.12, 4);
+  return retro(c);
+}
+
+/** Car body: paint with a door seam and a dirt sill; `burnt` scorches it black and rusty. */
+export function carTex(paint: string, seed: number, burnt = false) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(64, 64);
+  ctx.fillStyle = burnt ? '#26211e' : paint;
+  ctx.fillRect(0, 0, 64, 64);
+  noise(ctx, 64, 64, rnd, burnt ? 0.35 : 0.1, 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(30, 0, 1, 64);
+  const g = ctx.createLinearGradient(0, 44, 0, 64);
+  g.addColorStop(0, 'rgba(60,45,30,0)');
+  g.addColorStop(1, 'rgba(60,45,30,0.6)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 44, 64, 20);
+  if (burnt) {
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = rnd() > 0.5 ? `rgba(140,70,30,${0.3 + rnd() * 0.4})` : 'rgba(0,0,0,0.5)';
+      ctx.fillRect(rnd() * 64, rnd() * 64, 2 + rnd() * 6, 1 + rnd() * 4);
+    }
+  }
+  return retro(c);
+}
+
+export function tyreTex(seed = 96) {
+  const rnd = mulberry32(seed);
+  const [c, ctx] = canvas(32, 32);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, 32, 32);
+  for (let y = 0; y < 32; y += 4) {
+    ctx.fillStyle = 'rgba(60,60,60,0.6)';
+    ctx.fillRect(0, y, 32, 1);
+  }
+  noise(ctx, 32, 32, rnd, 0.2, 1);
+  return retro(c);
+}
+
+export function flameTex() {
+  const [c, ctx] = canvas(64, 128);
+  const g = ctx.createRadialGradient(32, 100, 2, 32, 90, 60);
+  g.addColorStop(0, 'rgba(255,250,210,1)');
+  g.addColorStop(0.2, 'rgba(255,190,70,0.95)');
+  g.addColorStop(0.5, 'rgba(230,80,20,0.6)');
+  g.addColorStop(1, 'rgba(120,20,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(32, 2);
+  ctx.bezierCurveTo(52, 50, 62, 80, 54, 110);
+  ctx.quadraticCurveTo(32, 128, 10, 110);
+  ctx.bezierCurveTo(2, 80, 12, 50, 32, 2);
+  ctx.fill();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

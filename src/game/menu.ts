@@ -313,12 +313,13 @@ export class Menu {
 
   /** Green/red tags for what an attachment changes, measured against the factory part. */
   private attachTags(key: string, val: string) {
-    if (!['optic', 'muzzle', 'under', 'mag'].includes(key)) return '';
+    if (!['optic', 'muzzle', 'under', 'mag', 'secAttach'].includes(key)) return '';
     const c = this.ctx.classes[this.editIndex];
-    const factory = { optic: fitsWeapon(OPTICS, c.weapon)[0].id, muzzle: 'none', under: 'none', mag: 'std' }[key as 'optic'];
+    const factory = { optic: fitsWeapon(OPTICS, c.weapon)[0].id, muzzle: 'none', under: 'none', mag: 'std', secAttach: 'none' }[key as 'optic'];
     if (val === factory) return '';
-    const a = computeStats({ ...c, [key]: factory } as Loadout);
-    const b = computeStats({ ...c, [key]: val } as Loadout);
+    const slot = key === 'secAttach' ? 'secondary' : 'primary';
+    const a = computeStats({ ...c, [key]: factory } as Loadout, slot);
+    const b = computeStats({ ...c, [key]: val } as Loadout, slot);
     const tags: [string, number, boolean][] = [
       ['VERT RECOIL', b.kickV / a.kickV - 1, false],
       ['SIDE RECOIL', b.kickH / a.kickH - 1, false],

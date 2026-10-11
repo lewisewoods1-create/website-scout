@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { skyPass } from './sky';
 
 /** Low-res PS1 world geometry. */
 export const LAYER_WORLD = 0;
@@ -66,12 +67,15 @@ float bayer4(vec2 p) {
 
 void main() {
   vec4 c = texture2D(tDiffuse, vUv);
-  gl_FragColor = vec4(c.rgb, 1.0);
+  if (c.a < 0.004) discard;
+  // the world pass is premultiplied over a clear background: undo that before grading
+  gl_FragColor = vec4(c.rgb / c.a, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
   vec2 px = floor(vUv * uLowRes);
   float d = (bayer4(px) - 0.5) * uDither;
   gl_FragColor.rgb = floor(gl_FragColor.rgb * uLevels + d + 0.5) / uLevels;
+  gl_FragColor.a = clamp(c.a, 0.0, 1.0);
 }
 `;
 
@@ -82,8 +86,9 @@ void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 
 /**
  * The hybrid pipeline:
+ *  0. painted sky drawn at full res (sky.ts)
  *  1. world + fx rendered into a ~240p target with vertex snapping & affine UVs
- *  2. upscaled with nearest filtering, 15-bit colour + Bayer dither
+ *  2. upscaled with nearest filtering, 15-bit colour + Bayer dither, over the sky
  *  3. world re-rendered depth-only at full res
  *  4. characters drawn at full res with full PBR, occluded by that depth
  *  5. depth cleared, viewmodel (gun + hands) drawn at full res on top
@@ -94,6 +99,7 @@ export class HybridRenderer {
   private quadScene = new THREE.Scene();
   private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private blit: THREE.ShaderMaterial;
+  private sky = skyPass();
   private depthOnly = ps1ify(new THREE.MeshBasicMaterial({ colorWrite: false }));
   lowHeight = 480;
 
@@ -123,6 +129,7 @@ export class HybridRenderer {
       },
       depthTest: false,
       depthWrite: false,
+      transparent: true,
     });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blit);
     quad.frustumCulled = false;
@@ -153,18 +160,25 @@ export class HybridRenderer {
     const r = this.gl;
     r.shadowMap.needsUpdate = true;
 
-    // 1. low-res world
-    scene.background = sky;
+    // 0. full-res sky
+    r.setRenderTarget(null);
+    r.clear();
+    camera.updateMatrixWorld();
+    this.sky.set(sky, camera);
+    r.render(this.sky.scene, this.quadCam);
+
+    // 1. low-res world over a transparent clear
+    scene.background = null;
     camera.layers.set(LAYER_WORLD);
     camera.layers.enable(LAYER_FX);
     r.setRenderTarget(this.lowRT);
+    r.setClearColor(0x000000, 0);
     r.clear();
     r.render(scene, camera);
-    scene.background = null;
+    r.setClearColor(0x000000, 1);
 
-    // 2. upscale + quantise
+    // 2. upscale + quantise, composited over the sky
     r.setRenderTarget(null);
-    r.clear();
     r.render(this.quadScene, this.quadCam);
 
     // 3. depth-only world at full res

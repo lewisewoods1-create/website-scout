@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { arena, container, crate, house, type MapBuilder, type MapDef } from './map';
 import * as T from './textures';
+import { paintSky } from './sky';
+import { GRIDLOCK, SCRAPLINE } from './bigmaps';
 
 /**
  * Map pool. Each map is a theme (sky, fog, light) plus a layout written with
@@ -23,7 +25,17 @@ const DEPOT: MapDef = {
   swatch: 'linear-gradient(160deg, #3a2147, #e08a3c 55%, #4a463e)',
   half: 32,
   theme: {
-    sky: () => T.skyTex(),
+    sky: () =>
+      paintSky({
+        zenith: '#140f2a', upper: '#4a2a55', horizon: '#f0904a', below: '#2a1d1c', haze: '#b0584a',
+        sun: { toward: [-40, -12], el: 6, size: 1.6, color: '#fff0c0', glow: 'rgba(255,170,90,0.75)', glowSize: 34 },
+        clouds: { kind: 'stratus', count: 70, lit: '#ffb27a', shade: '#5a2f4a', el0: 3, el1: 30, alpha: 0.55 },
+        ridges: [
+          { kind: 'mountains', color: '#3a2440', base: 0, amp: 7, seed: 3 },
+          { kind: 'industry', color: '#170f14', base: -1, amp: 6, seed: 9, lights: '#ffcf7a' },
+        ],
+        smoke: [[0.62, '#2a1a22'], [0.9, '#3a2530']],
+      }, 5),
     fog: [0x3b2a30, 24, 110],
     hemi: [0xa592c4, 0x3a2e22, 1.5],
     sun: [0xffa860, 2.4, -40, 22, -12],
@@ -107,11 +119,15 @@ const OUTPOST: MapDef = {
   half: 32,
   theme: {
     sky: () =>
-      T.skyThemed({
-        stops: [[0, '#4f86c4'], [0.42, '#a9c6dc'], [0.5, '#efe0bf'], [0.53, '#a68c66'], [1, '#5a4a36']],
-        sun: { u: 0.7, v: 0.16, r: 5, color: '#fffbe8' },
-        clouds: { color: '#ffffff', count: 25, v0: 0.18, v1: 0.42 },
-        skyline: '#9a8160',
+      paintSky({
+        zenith: '#2d63a8', upper: '#6fa3d6', horizon: '#e6dcc4', below: '#b49a72', haze: '#dccfae',
+        sun: { toward: [30, 20], el: 48, size: 1.4, color: '#fffdf2', glow: 'rgba(255,250,225,0.6)', glowSize: 22 },
+        clouds: { kind: 'cumulus', count: 46, lit: '#ffffff', shade: '#b8c4d4', el0: 4, el1: 34, alpha: 0.95 },
+        ridges: [
+          { kind: 'mountains', color: '#a48d74', base: 0.5, amp: 9, seed: 21, rough: 0.62 },
+          { kind: 'mountains', color: '#8f7458', base: -0.5, amp: 4.5, seed: 33 },
+          { kind: 'dunes', color: '#c2a272', base: -1.5, amp: 3, seed: 44 },
+        ],
       }, 7),
     fog: [0xd2bc94, 30, 130],
     hemi: [0xbcd4ff, 0x8a6a44, 1.35],
@@ -172,11 +188,15 @@ const WHITEOUT: MapDef = {
   half: 32,
   theme: {
     sky: () =>
-      T.skyThemed({
-        stops: [[0, '#5f7083'], [0.45, '#b9c4cf'], [0.5, '#e6ebef'], [0.55, '#a3adb6'], [1, '#5e666e']],
-        sun: { u: 0.35, v: 0.3, r: 6, color: 'rgba(255,255,255,0.6)' },
-        clouds: { color: '#ffffff', count: 60, v0: 0.15, v1: 0.48 },
-        skyline: '#7d8893',
+      paintSky({
+        zenith: '#5b6a7c', upper: '#9aa8b8', horizon: '#e4e9ee', below: '#c4ccd4', haze: '#dde3e9',
+        sun: { toward: [-20, 30], el: 22, size: 2.4, color: 'rgba(255,255,255,0.55)', glow: 'rgba(255,255,255,0.35)', glowSize: 26 },
+        clouds: { kind: 'overcast', count: 90, lit: '#eef1f4', shade: '#8a96a4', el0: 6, el1: 60, alpha: 0.6 },
+        ridges: [
+          { kind: 'mountains', color: '#c9d2dc', base: 1, amp: 13, seed: 51, rough: 0.66 },
+          { kind: 'mountains', color: '#8c99a8', base: 0, amp: 6, seed: 62 },
+          { kind: 'trees', color: '#3d4a4c', base: -1, amp: 3, seed: 71 },
+        ],
       }, 11),
     fog: [0xc9d2db, 18, 90],
     hemi: [0xdde8ff, 0x8090a0, 1.7],
@@ -229,7 +249,7 @@ const WHITEOUT: MapDef = {
   },
 };
 
-export const MAPS: MapDef[] = [DEPOT, OUTPOST, WHITEOUT];
+export const MAPS: MapDef[] = [DEPOT, OUTPOST, WHITEOUT, GRIDLOCK, SCRAPLINE];
 
 export function mapById(id: string): MapDef {
   return MAPS.find((m) => m.id === id) ?? DEPOT;

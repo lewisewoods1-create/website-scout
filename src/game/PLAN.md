@@ -1,6 +1,6 @@
 # DEAD PIXEL: plan for the next phases
 
-Status: Phase 0–1 playable (bot TDM/FFA, create-a-class, 3 maps, local progression).
+Status: Phase 0–1 playable (bot TDM/FFA, create-a-class, 5 maps, local progression).
 Everything below is a proposal to agree before building.
 
 ---
@@ -55,8 +55,9 @@ Browser client ──WebSocket──▶ Game server (Colyseus, Node) ──▶ S
 
 ## 3. Map pool
 
-Built: **Depot** (dusk container yard), **Outpost** (desert village), **Whiteout** (arctic station).
-All maps share the 64×64m arena size and the `MapDef` format in `maps.ts`: a theme (sky, fog, light) plus a layout. Adding a map is one object.
+Built: **Depot** (dusk container yard), **Outpost** (desert village), **Whiteout** (arctic station) at 64×64 m, plus the large maps **Gridlock** and **Scrapline** at 96×96 m (`bigmaps.ts`).
+Every map is a `MapDef`: a theme (painted sky panorama from `sky.ts`, fog, light) plus a layout. Adding a map is one object.
+Skies are full-resolution panoramas drawn behind the low-res world, not part of the PS1 pass.
 
 Theme ideas to pick from (TBC):
 | Theme | Hook | Size |
@@ -69,7 +70,11 @@ Theme ideas to pick from (TBC):
 
 Needs before more maps: stairs/ramps and a second floor in the collision and nav code (both are flat today), and per-map spawn tuning.
 
-### Scope: two bigger maps (proposed, not built)
+### Two bigger maps (built, first pass)
+
+Built in `bigmaps.ts` with these cuts from the scope below: the nav grid is still flat, so the Gridlock flyover and the Scrapline office roof are player-only high ground reached by stair blocks (bots fight from the ground); no tanker explosion, puddle reflections, swaying magnet or rolling fog yet. Fires are full-res flame sprites with smoke columns and flickering lights (`mapfx.ts`).
+
+Original scope:
 
 Both are **96×96 m** (2.25× the area of today's 64 m maps), sized for 6v6 TDM with room for 9v9 later.
 Each keeps the PS1 low-res world and adds full-res "hero" props in the character layer (fire, sparks, glass).

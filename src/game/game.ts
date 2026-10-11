@@ -1684,6 +1684,7 @@ export class Game {
     this.world.now = this.now;
     if (this.phase === 'attract') this.updateAttract(dt);
     else this.updateMatch(dt);
+    this.map.tick(dt, this.now);
 
     // character light rides on the camera
     const cam = this.camera;
