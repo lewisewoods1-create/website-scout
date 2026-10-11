@@ -23,7 +23,7 @@ A public URL (e.g. `deadpixel.gg`) where anyone can play bot matches instantly w
 ### Saves (built, local; cloud-ready)
 `save.ts` owns all persistence: profile, classes and settings are versioned JSON with a rolling `.bak` copy
 (corrupt writes fall back), the browser is asked for persistent storage, and Settings → Save Data exports/imports
-a checksummed save code or `.dpsave` file. For accounts, implement `RemoteSync { push, pull }` against the
+a checksummed save code or `.txt` save file. For accounts, implement `RemoteSync { push, pull }` against the
 `profiles`/`classes` tables below and call `setRemoteSync()` after login; writes are then pushed (debounced)
 and `pullRemote()` restores a newer cloud copy. Online XP stays server-written.
 

@@ -305,8 +305,8 @@ export class Menu {
       <div class="savebox">
         <div class="sub" style="margin:0">${storageOk() ? `Progress saves automatically in this browser${lastSavedAt() ? ` · last saved ${new Date(lastSavedAt()).toLocaleTimeString()}` : ''}. Keep a backup code or file to move it to another browser or restore it.` : 'This browser is blocking storage, so progress only lasts this session. Export a save code before you close the tab.'}</div>
         <div class="row"><button type="button" class="go small" data-save="copy">COPY SAVE CODE</button><button type="button" class="go small ghost" data-save="file">DOWNLOAD SAVE FILE</button></div>
-        <textarea id="save-code" rows="3" spellcheck="false" placeholder="Paste a save code here, or load a .dpsave file" aria-label="Save code"></textarea>
-        <div class="row"><button type="button" class="go small ghost" data-save="import">IMPORT CODE</button><label class="go small ghost file">LOAD FILE<input type="file" id="save-file" accept=".dpsave,.txt"></label></div>
+        <textarea id="save-code" rows="3" spellcheck="false" placeholder="Paste a save code here, or load a save file" aria-label="Save code"></textarea>
+        <div class="row"><button type="button" class="go small ghost" data-save="import">IMPORT CODE</button><label class="go small ghost file">LOAD FILE<input type="file" id="save-file" accept=".txt,.dpsave"></label></div>
         <div id="save-msg" class="sub" style="margin:0" role="status"></div>
       </div></div></div>`;
   }
@@ -880,7 +880,7 @@ export class Menu {
           ta.select();
           navigator.clipboard?.writeText(code).then(() => saveMsg('Save code copied. Keep it somewhere safe.'), () => saveMsg('Select the code above and copy it.'));
         }
-        if (act === 'file') downloadSave();
+        if (act === 'file') void downloadSave().then(saveMsg);
         if (act === 'import') importText((panel.querySelector('#save-code') as HTMLTextAreaElement).value);
       }),
     );

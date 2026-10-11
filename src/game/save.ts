@@ -159,16 +159,37 @@ export function applySnapshot(snap: SaveSnapshot) {
   if (snap.settings) writeSave(SAVE_KEYS.settings, snap.settings);
 }
 
-/** Offer the save as a downloadable file. */
-export function downloadSave() {
-  const blob = new Blob([exportCode()], { type: 'text/plain' });
+/**
+ * Offer the save as a downloadable .txt file. Inside the claude.ai artifact viewer the
+ * download goes through the viewer's `downloads` capability (it asks the player first);
+ * anywhere else a normal download link is used. Resolves a short status message.
+ */
+export async function downloadSave(): Promise<string> {
+  const filename = `dead-pixel-save-${new Date().toISOString().slice(0, 10)}.txt`;
+  const data = exportCode();
+  type Downloads = { save(r: { filename: string; data: string }): Promise<unknown> };
+  const host = (window as unknown as { claude?: { use(n: string): Promise<Downloads | null> } }).claude;
+  if (host?.use) {
+    const dl = await host.use('downloads').catch(() => null);
+    if (dl) {
+      try {
+        await dl.save({ filename, data });
+        return 'Save file downloaded.';
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        return code === 'declined' ? 'Download cancelled.' : 'Downloads are not available here. Use COPY SAVE CODE instead.';
+      }
+    }
+  }
+  const blob = new Blob([data], { type: 'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `dead-pixel-save-${new Date().toISOString().slice(0, 10)}.dpsave`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return 'Save file downloaded.';
 }
 
 // ---------------------------------------------------------------- cloud hook (ready, unused)
